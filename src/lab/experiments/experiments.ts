@@ -14,8 +14,18 @@ import {
   noiseExperiment,
 } from "../../experiments/003-noise/experiment";
 
+import {
+  fbmExperiment,
+} from "../../experiments/004-fbm/experiment";
+
+import {
+  domainWarpingExperiment,
+} from "../../experiments/005-domain-warping/experiment";
+
 export const experiments: ShadexExperiment[] = [
   gradientExperiment,
   shapesExperiment,
   noiseExperiment,
+  fbmExperiment,
+  domainWarpingExperiment,
 ];
