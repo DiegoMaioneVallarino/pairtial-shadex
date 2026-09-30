@@ -3,22 +3,40 @@ import {
   useRef,
 } from "react";
 
-import { Renderer } from "../../engine/core/Renderer";
-
 import {
-  gradientExperiment,
-} from "../../experiments/001-gradient/experiment";
+  Renderer,
+} from "../../engine/core/Renderer";
 
 import "./Viewport.css";
 
-export function Viewport() {
+interface ViewportExperiment {
+  id: string;
+  name: string;
+
+  vertexShader: string;
+  fragmentShader: string;
+
+  uniforms?: Record<
+    string,
+    number
+  >;
+}
+
+interface ViewportProps {
+  experiment: ViewportExperiment;
+}
+
+export function Viewport({
+  experiment,
+}: ViewportProps) {
   const canvasRef =
     useRef<HTMLCanvasElement | null>(
       null,
     );
 
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas =
+      canvasRef.current;
 
     if (!canvas) {
       return;
@@ -28,16 +46,30 @@ export function Viewport() {
       new Renderer(canvas);
 
     renderer.setShader(
-      gradientExperiment.vertexShader,
-      gradientExperiment.fragmentShader,
+      experiment.vertexShader,
+      experiment.fragmentShader,
     );
+
+    if (experiment.uniforms) {
+      for (
+        const [name, value]
+        of Object.entries(
+          experiment.uniforms,
+        )
+      ) {
+        renderer.setUniform(
+          name,
+          value,
+        );
+      }
+    }
 
     renderer.start();
 
     return () => {
       renderer.destroy();
     };
-  }, []);
+  }, [experiment]);
 
   return (
     <section className="viewport">
@@ -49,12 +81,12 @@ export function Viewport() {
       <div className="viewport__info">
         <div>
           <span className="viewport__live" />
-
           LIVE
         </div>
 
         <strong>
-          001 / Gradient
+          {experiment.id} /{" "}
+          {experiment.name}
         </strong>
       </div>
     </section>

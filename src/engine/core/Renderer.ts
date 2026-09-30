@@ -7,6 +7,8 @@ export class Renderer {
 
   private startTime = performance.now();
 
+private uniforms: Record<string, number> = {};
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
@@ -23,7 +25,12 @@ export class Renderer {
 
     this.gl = gl;
   }
-
+setUniform(
+  name: string,
+  value: number,
+) {
+  this.uniforms[name] = value;
+}
   setShader(
     vertexSource: string,
     fragmentSource: string,
@@ -118,7 +125,23 @@ export class Renderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     gl.useProgram(this.program);
+for (
+  const [name, value]
+  of Object.entries(this.uniforms)
+) {
+  const location =
+    gl.getUniformLocation(
+      this.program,
+      `u_${name}`,
+    );
 
+  if (location !== null) {
+    gl.uniform1f(
+      location,
+      value,
+    );
+  }
+}
     const timeLocation =
       gl.getUniformLocation(
         this.program,
@@ -135,14 +158,14 @@ export class Renderer {
       (performance.now() - this.startTime) /
       1000;
 
-    if (timeLocation) {
-      gl.uniform1f(
+if (timeLocation !== null) {
+          gl.uniform1f(
         timeLocation,
         elapsed,
       );
     }
 
-    if (resolutionLocation) {
+   if (resolutionLocation !== null) {
       gl.uniform2f(
         resolutionLocation,
         this.canvas.width,

@@ -1,8 +1,28 @@
-import { Viewport } from "./viewport/Viewport";
+import {
+  useState,
+} from "react";
+
+import {
+  experiments,
+} from "./experiments/experiments";
+
+import {
+  Viewport,
+} from "./viewport/Viewport";
 
 import "./Lab.css";
 
 export function Lab() {
+  const [
+    activeExperimentIndex,
+    setActiveExperimentIndex,
+  ] = useState(1);
+
+  const activeExperiment =
+    experiments[
+      activeExperimentIndex
+    ];
+
   return (
     <section className="lab">
       <header className="lab__header">
@@ -12,16 +32,32 @@ export function Lab() {
           </div>
 
           <div>
-            <strong>Pairtial Shadex</strong>
-            <small>Generative Visual Engine</small>
+            <strong>
+              Pairtial Shadex
+            </strong>
+
+            <small>
+              Generative Visual Engine
+            </small>
           </div>
         </div>
 
         <nav className="lab__navigation">
-          <button className="is-active">Experiment</button>
-          <button>Gallery</button>
-          <button>Render</button>
-          <button>Presets</button>
+          <button className="is-active">
+            Experiment
+          </button>
+
+          <button>
+            Gallery
+          </button>
+
+          <button>
+            Render
+          </button>
+
+          <button>
+            Presets
+          </button>
         </nav>
 
         <div className="lab__status">
@@ -33,26 +69,59 @@ export function Lab() {
       <div className="lab__workspace">
         <aside className="lab__sidebar">
           <span className="lab__section-label">
-            FUNDAMENTALS
+            EXPERIMENTS
           </span>
 
-          <button className="lab__experiment is-active">
-            <span>001</span>
-            Gradient
-          </button>
+          {experiments.map(
+            (experiment, index) => (
+              <button
+                key={experiment.id}
+                className={
+                  "lab__experiment " +
+                  (
+                    index ===
+                    activeExperimentIndex
+                      ? "is-active"
+                      : ""
+                  )
+                }
+                onClick={() =>
+                  setActiveExperimentIndex(
+                    index,
+                  )
+                }
+              >
+                <span>
+                  {String(
+                    index + 1,
+                  ).padStart(3, "0")}
+                </span>
+
+                {experiment.name}
+              </button>
+            ),
+          )}
         </aside>
 
-        <Viewport />
+        <Viewport
+          experiment={
+            activeExperiment
+          }
+        />
 
         <aside className="lab__properties">
           <span className="lab__section-label">
             EXPERIMENT
           </span>
 
-          <h2>Gradient</h2>
+          <h2>
+            {activeExperiment.name}
+          </h2>
 
           <p>
-            Our first Shadex experiment.
+            {
+              activeExperiment.description
+            }
           </p>
 
           <div className="lab__property">
@@ -62,7 +131,9 @@ export function Lab() {
 
           <div className="lab__property">
             <span>Shader</span>
-            <strong>GLSL ES 3.0</strong>
+            <strong>
+              GLSL ES 3.0
+            </strong>
           </div>
         </aside>
       </div>
