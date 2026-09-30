@@ -1,7 +1,11 @@
+import type {
+  ShadexExperiment,
+} from "../experiment.types";
+
 import vertexShader from "./vertex.glsl?raw";
 import fragmentShader from "./fragment.glsl?raw";
 
-export const shapesExperiment = {
+export const shapesExperiment: ShadexExperiment = {
   id: "002-shapes",
 
   name: "Shapes",
@@ -12,8 +16,19 @@ export const shapesExperiment = {
   vertexShader,
   fragmentShader,
 
-  uniforms: {
-    radius: 0.55,
-    softness: 0.015,
+  parameters: {
+    radius: {
+      value: 0.55,
+      min: 0.1,
+      max: 1.0,
+      step: 0.01,
+    },
+
+    softness: {
+      value: 0.015,
+      min: 0.001,
+      max: 0.15,
+      step: 0.001,
+    },
   },
 };

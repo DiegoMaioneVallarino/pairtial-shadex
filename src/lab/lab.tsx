@@ -1,7 +1,11 @@
 import {
+  useEffect,
   useState,
 } from "react";
 
+import {
+  Slider,
+} from "./controls/Slider";
 import {
   experiments,
 } from "./experiments/experiments";
@@ -22,7 +26,31 @@ export function Lab() {
     experiments[
       activeExperimentIndex
     ];
+const createValues = () => {
+  const result: Record<
+    string,
+    number
+  > = {};
 
+  for (
+    const [name, parameter]
+    of Object.entries(
+      activeExperiment.parameters ?? {},
+    )
+  ) {
+    result[name] =
+      parameter.value;
+  }
+
+  return result;
+};
+
+const [
+  parameterValues,
+  setParameterValues,
+] = useState<
+  Record<string, number>
+>(() => createValues());
   return (
     <section className="lab">
       <header className="lab__header">
@@ -104,10 +132,9 @@ export function Lab() {
         </aside>
 
         <Viewport
-          experiment={
-            activeExperiment
-          }
-        />
+  experiment={activeExperiment}
+  values={parameterValues}
+/>
 
         <aside className="lab__properties">
           <span className="lab__section-label">
@@ -123,6 +150,32 @@ export function Lab() {
               activeExperiment.description
             }
           </p>
+
+          {Object.entries(
+  activeExperiment.parameters ?? {},
+).map(
+  ([name, parameter]) => (
+    <Slider
+      key={name}
+      label={name}
+      value={
+        parameterValues[name] ??
+        parameter.value
+      }
+      min={parameter.min}
+      max={parameter.max}
+      step={parameter.step}
+      onChange={(value) => {
+        setParameterValues(
+          (current) => ({
+            ...current,
+            [name]: value,
+          }),
+        );
+      }}
+    />
+  ),
+)}
 
           <div className="lab__property">
             <span>Renderer</span>

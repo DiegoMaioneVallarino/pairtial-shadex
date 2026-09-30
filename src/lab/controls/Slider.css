@@ -1,0 +1,42 @@
+.control-slider {
+  display: block;
+
+  padding: 14px 0;
+
+  border-bottom:
+    1px solid
+    rgba(255, 255, 255, 0.06);
+}
+
+.control-slider__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  margin-bottom: 10px;
+
+  font-size: 11px;
+}
+
+.control-slider__header span {
+  color:
+    rgba(255, 255, 255, 0.55);
+
+  text-transform: capitalize;
+}
+
+.control-slider__header strong {
+  color:
+    rgba(255, 255, 255, 0.8);
+
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.control-slider input {
+  width: 100%;
+
+  accent-color: #7b72ff;
+
+  cursor: pointer;
+}
