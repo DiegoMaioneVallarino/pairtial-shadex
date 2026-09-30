@@ -22,10 +22,16 @@ import {
   domainWarpingExperiment,
 } from "../../experiments/005-domain-warping/experiment";
 
+import {
+  normalsExperiment,
+} from "../../experiments/006-normals/experiment";
+
+
 export const experiments: ShadexExperiment[] = [
   gradientExperiment,
   shapesExperiment,
   noiseExperiment,
   fbmExperiment,
   domainWarpingExperiment,
+  normalsExperiment,
 ];
