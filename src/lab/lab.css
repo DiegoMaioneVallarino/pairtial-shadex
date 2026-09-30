@@ -169,6 +169,7 @@
   border-radius: 22px;
 
   background: rgba(255, 255, 255, 0.025);
+    overflow-y: overlay;
 }
 
 .lab__section-label {
@@ -250,4 +251,391 @@
 
 .lab__property strong {
   font-weight: 500;
+}
+
+/* =========================================================
+   SHADEX CONTROLS
+   ========================================================= */
+
+.lab__controls {
+  display: flex;
+  flex-direction: column;
+
+  gap: 14px;
+
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+
+/* ---------------------------------------------------------
+   BASE CONTROL
+   --------------------------------------------------------- */
+
+.control {
+  width: 100%;
+
+  box-sizing: border-box;
+}
+
+.control > span {
+  display: block;
+
+  margin-bottom: 7px;
+
+  color:
+    rgba(255, 255, 255, 0.58);
+
+  font-size: 11px;
+  font-weight: 600;
+
+  letter-spacing: 0.02em;
+}
+
+
+/* =========================================================
+   COLOR PICKER
+   ========================================================= */
+
+.color-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 42px;
+
+  padding: 7px 8px 7px 12px;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.08);
+
+  border-radius: 12px;
+
+  background:
+    rgba(255, 255, 255, 0.035);
+}
+
+.color-control > span {
+  margin: 0;
+}
+
+.color-control input[type="color"] {
+  width: 42px;
+  height: 28px;
+
+  padding: 0;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.12);
+
+  border-radius: 8px;
+
+  background: transparent;
+
+  cursor: pointer;
+
+  overflow: hidden;
+}
+
+.color-control input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-control input[type="color"]::-webkit-color-swatch {
+  border: none;
+
+  border-radius: 7px;
+}
+
+.color-control input[type="color"]::-moz-color-swatch {
+  border: none;
+
+  border-radius: 7px;
+}
+
+
+/* =========================================================
+   VECTOR INPUT
+   ========================================================= */
+
+.vector-control {
+  padding: 10px 12px;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.08);
+
+  border-radius: 12px;
+
+  background:
+    rgba(255, 255, 255, 0.035);
+}
+
+.vector-inputs {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(0, 1fr)
+    );
+
+  gap: 6px;
+}
+
+.vector-inputs input {
+  width: 100%;
+  min-width: 0;
+
+  box-sizing: border-box;
+
+  padding: 7px 8px;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.08);
+
+  border-radius: 8px;
+
+  outline: none;
+
+  background:
+    rgba(0, 0, 0, 0.22);
+
+  color:
+    rgba(255, 255, 255, 0.88);
+
+  font-family: inherit;
+  font-size: 11px;
+
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.vector-inputs input:hover {
+  border-color:
+    rgba(255, 255, 255, 0.15);
+}
+
+.vector-inputs input:focus {
+  border-color:
+    rgba(115, 151, 255, 0.55);
+
+  background:
+    rgba(0, 0, 0, 0.32);
+}
+
+
+/* Remove ugly browser number arrows */
+
+.vector-inputs input::-webkit-inner-spin-button,
+.vector-inputs input::-webkit-outer-spin-button {
+  margin: 0;
+
+  appearance: none;
+}
+
+
+/* =========================================================
+   TOGGLE
+   ========================================================= */
+
+.toggle-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 42px;
+
+  padding: 7px 9px 7px 12px;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.08);
+
+  border-radius: 12px;
+
+  background:
+    rgba(255, 255, 255, 0.035);
+
+  cursor: pointer;
+}
+
+.toggle-control > span {
+  margin: 0;
+}
+
+.toggle-control input {
+  position: relative;
+
+  width: 36px;
+  height: 20px;
+
+  margin: 0;
+
+  appearance: none;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.12);
+
+  border-radius: 999px;
+
+  background:
+    rgba(255, 255, 255, 0.08);
+
+  cursor: pointer;
+
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.toggle-control input::after {
+  content: "";
+
+  position: absolute;
+
+  top: 2px;
+  left: 2px;
+
+  width: 14px;
+  height: 14px;
+
+  border-radius: 50%;
+
+  background:
+    rgba(255, 255, 255, 0.75);
+
+  box-shadow:
+    0 2px 6px
+    rgba(0, 0, 0, 0.3);
+
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.toggle-control input:checked {
+  border-color:
+    rgba(105, 143, 255, 0.65);
+
+  background:
+    rgba(85, 126, 255, 0.72);
+}
+
+.toggle-control input:checked::after {
+  transform:
+    translateX(16px);
+
+  background: white;
+}
+
+
+/* =========================================================
+   SELECT
+   ========================================================= */
+
+.select-control {
+  display: flex;
+  flex-direction: column;
+
+  gap: 7px;
+}
+
+.select-control > span {
+  margin: 0;
+}
+
+.select-control select {
+  width: 100%;
+
+  box-sizing: border-box;
+
+  padding:
+    9px 34px
+    9px 11px;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.08);
+
+  border-radius: 10px;
+
+  outline: none;
+
+  background:
+    rgba(255, 255, 255, 0.045);
+
+  color:
+    rgba(255, 255, 255, 0.86);
+
+  font-family: inherit;
+  font-size: 11px;
+
+  cursor: pointer;
+
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.select-control select:hover {
+  border-color:
+    rgba(255, 255, 255, 0.15);
+
+  background:
+    rgba(255, 255, 255, 0.065);
+}
+
+.select-control select:focus {
+  border-color:
+    rgba(115, 151, 255, 0.5);
+}
+
+.select-control option {
+  background: #11131a;
+
+  color: white;
+}
+
+
+/* =========================================================
+   PROPERTIES SCROLL
+   ========================================================= */
+
+.lab__properties {
+  min-height: 0;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  scrollbar-width: thin;
+
+  scrollbar-color:
+    rgba(255, 255, 255, 0.14)
+    transparent;
+}
+
+.lab__properties::-webkit-scrollbar {
+  width: 5px;
+}
+
+.lab__properties::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lab__properties::-webkit-scrollbar-thumb {
+  background:
+    rgba(255, 255, 255, 0.14);
+
+  border-radius: 999px;
+}
+
+.lab__properties::-webkit-scrollbar-thumb:hover {
+  background:
+    rgba(255, 255, 255, 0.24);
 }
