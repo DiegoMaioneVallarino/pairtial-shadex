@@ -1,7 +1,3 @@
-import type {
-  ShadexExperiment,
-} from "../../experiments/experiment.types";
-
 import {
   gradientExperiment,
 } from "../../experiments/001-gradient/experiment";
@@ -102,7 +98,6 @@ import {
   fieldCompositionExperiment,
 } from "../../experiments/025-field-composition/experiment";
 
-
 import {
   luminous3DCurveExperiment,
 } from "../../experiments/026-luminous-3d-curve/experiment";
@@ -127,46 +122,42 @@ import {
   proceduralPlanetExperiment,
 } from "../../experiments/033-procedural-planet/experiment";
 
-export const experiments: ShadexExperiment[] = [
+import {
+  blockGraphExperiment,
+} from "../../experiments/034-block-graph/experiment";
+
+
+export const experiments = [
   gradientExperiment,
   shapesExperiment,
   noiseExperiment,
   fbmExperiment,
   domainWarpingExperiment,
-
   normalsExperiment,
   diffuseLightExperiment,
   specularExperiment,
-
   fresnelExperiment,
   multipleLightsExperiment,
   glassExperiment,
-
   liquidGlassExperiment,
   causticsExperiment,
   volumetricLightExperiment,
-
   liquidMetalExperiment,
-iridescenceExperiment,
-cloudsExperiment,
-auroraExperiment,
-abstractFlowExperiment,
-
-appleBackgroundExperiment,
-meshGradientExperiment,
-silkExperiment,
-holographicGlassExperiment,
-fluidEnergyExperiment,
-
-holographicGlassExperiment,
-fluidEnergyExperiment,
-fieldCompositionExperiment,
-luminous3DCurveExperiment,
-sdfLaboratoryExperiment,
-
-pixelRendererExperiment,
-fractalVolumeExperiment,
-fractalLightTunnelExperiment,
-proceduralPlanetExperiment,
-
+  iridescenceExperiment,
+  cloudsExperiment,
+  auroraExperiment,
+  abstractFlowExperiment,
+  appleBackgroundExperiment,
+  meshGradientExperiment,
+  silkExperiment,
+  holographicGlassExperiment,
+  fluidEnergyExperiment,
+  fieldCompositionExperiment,
+  luminous3DCurveExperiment,
+  sdfLaboratoryExperiment,
+  pixelRendererExperiment,
+  fractalVolumeExperiment,
+  fractalLightTunnelExperiment,
+  proceduralPlanetExperiment,
+  blockGraphExperiment,
 ];

@@ -1,7 +1,7 @@
 import type {
   Vec2Value,
   Vec3Value,
-} from "../../experiments/experiment.types";
+} from "../experiments/experiment.types";
 
 
 type VectorValue =

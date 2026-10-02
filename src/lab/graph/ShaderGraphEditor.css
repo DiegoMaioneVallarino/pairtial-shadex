@@ -1,0 +1,441 @@
+.shader-graph-editor {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+
+  width: 100%;
+  height: 100%;
+
+  min-height: 420px;
+
+  overflow: hidden;
+
+  border: 1px solid
+    rgba(255, 255, 255, 0.08);
+
+  border-radius: 18px;
+
+  background:
+    rgba(8, 10, 18, 0.72);
+}
+
+
+.shader-block-library {
+  position: relative;
+
+  z-index: 10;
+
+  display: flex;
+  flex-direction: column;
+
+  border-right: 1px solid
+    rgba(255, 255, 255, 0.08);
+
+  background:
+    rgba(255, 255, 255, 0.025);
+
+  backdrop-filter:
+    blur(20px);
+}
+
+
+.shader-block-library__header {
+  padding:
+    18px 16px 12px;
+
+  font-size: 12px;
+  font-weight: 700;
+
+  letter-spacing: 0.08em;
+
+  text-transform: uppercase;
+
+  color:
+    rgba(255, 255, 255, 0.5);
+}
+
+
+.shader-block-library__list {
+  display: flex;
+  flex-direction: column;
+
+  gap: 6px;
+
+  padding:
+    4px 10px 16px;
+}
+
+
+.shader-block-library__item {
+  display: flex;
+  align-items: center;
+
+  gap: 9px;
+
+  width: 100%;
+
+  padding:
+    10px 11px;
+
+  border: 1px solid
+    rgba(255, 255, 255, 0.06);
+
+  border-radius: 10px;
+
+  background:
+    rgba(255, 255, 255, 0.035);
+
+  color:
+    rgba(255, 255, 255, 0.78);
+
+  font: inherit;
+  font-size: 12px;
+
+  text-align: left;
+
+  cursor: pointer;
+
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+
+.shader-block-library__item:hover {
+  background:
+    rgba(255, 255, 255, 0.07);
+
+  border-color:
+    rgba(255, 255, 255, 0.12);
+
+  transform:
+    translateX(2px);
+}
+
+
+.shader-block-library__item span {
+  color:
+    rgba(130, 180, 255, 0.9);
+
+  font-size: 16px;
+}
+
+
+.shader-graph-canvas {
+  position: relative;
+
+  overflow: auto;
+
+  min-width: 0;
+
+  min-height: 420px;
+
+  background:
+    #080a10;
+}
+
+
+.shader-graph-grid {
+  position: absolute;
+
+  inset: 0;
+
+  width: 2000px;
+  height: 1200px;
+
+  pointer-events: none;
+
+  background-image:
+    radial-gradient(
+      circle,
+      rgba(255, 255, 255, 0.09)
+        1px,
+      transparent 1px
+    );
+
+  background-size:
+    20px 20px;
+}
+
+
+.shader-connections {
+  position: absolute;
+
+  left: 0;
+  top: 0;
+
+  width: 2000px;
+  height: 1200px;
+
+  overflow: visible;
+
+  pointer-events: none;
+}
+
+
+.shader-connection {
+  fill: none;
+
+  stroke:
+    rgba(110, 165, 255, 0.7);
+
+  stroke-width: 2;
+
+  vector-effect:
+    non-scaling-stroke;
+}
+
+
+.shader-block {
+  position: absolute;
+
+  z-index: 2;
+
+  width: 190px;
+
+  overflow: hidden;
+
+  border: 1px solid
+    rgba(255, 255, 255, 0.1);
+
+  border-radius: 13px;
+
+  background:
+    rgba(20, 23, 34, 0.94);
+
+  box-shadow:
+    0 12px 40px
+    rgba(0, 0, 0, 0.22);
+
+  user-select: none;
+
+  cursor: default;
+
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+
+.shader-block:hover {
+  border-color:
+    rgba(255, 255, 255, 0.18);
+}
+
+
+.shader-block--selected {
+  border-color:
+    rgba(105, 165, 255, 0.85);
+
+  box-shadow:
+    0 0 0 1px
+      rgba(105, 165, 255, 0.18),
+    0 16px 45px
+      rgba(0, 0, 0, 0.3);
+}
+
+
+.shader-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  height: 42px;
+
+  padding:
+    0 12px;
+
+  border-bottom: 1px solid
+    rgba(255, 255, 255, 0.07);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.07),
+      rgba(255, 255, 255, 0.02)
+    );
+}
+
+
+.shader-block__type {
+  font-size: 12px;
+  font-weight: 650;
+
+  color:
+    rgba(255, 255, 255, 0.92);
+}
+
+
+.shader-block__id {
+  font-size: 9px;
+
+  color:
+    rgba(255, 255, 255, 0.3);
+}
+
+
+.shader-block__body {
+  padding:
+    9px 0 10px;
+}
+
+
+.shader-block__ports {
+  display: flex;
+  flex-direction: column;
+
+  gap: 3px;
+}
+
+
+.shader-block__inputs,
+.shader-block__outputs {
+  display: flex;
+  flex-direction: column;
+
+  gap: 2px;
+}
+
+
+.shader-port {
+  display: flex;
+  align-items: center;
+
+  min-height: 26px;
+
+  gap: 6px;
+
+  font-size: 10px;
+
+  color:
+    rgba(255, 255, 255, 0.68);
+}
+
+
+.shader-port--input {
+  padding-right: 10px;
+}
+
+
+.shader-port--output {
+  justify-content: flex-end;
+
+  padding-left: 10px;
+}
+
+
+.shader-port small {
+  font-size: 8px;
+
+  color:
+    rgba(255, 255, 255, 0.28);
+}
+
+
+.shader-port__socket {
+  display: block;
+
+  width: 9px;
+  height: 9px;
+
+  flex:
+    0 0 9px;
+
+  border: 2px solid
+    rgba(120, 175, 255, 0.9);
+
+  border-radius: 50%;
+
+  background:
+    #121620;
+}
+
+
+.shader-port--input
+.shader-port__socket {
+  margin-left: -5px;
+}
+
+
+.shader-port--output
+.shader-port__socket {
+  margin-right: -5px;
+}
+
+
+.shader-block__parameter-summary {
+  display: flex;
+  flex-direction: column;
+
+  gap: 4px;
+
+  margin:
+    8px 10px 0;
+
+  padding-top:
+    8px;
+
+  border-top: 1px solid
+    rgba(255, 255, 255, 0.06);
+}
+
+
+.shader-block__parameter {
+  font-size: 9px;
+
+  color:
+    rgba(255, 255, 255, 0.36);
+}
+
+.shader-block__header {
+  cursor: grab;
+  touch-action: none;
+}
+
+.shader-block__header:active {
+  cursor: grabbing;
+}
+
+.shader-port__socket {
+  position: relative;
+
+  z-index: 5;
+
+  cursor: crosshair;
+
+  transition:
+    transform 100ms ease,
+    background 100ms ease,
+    box-shadow 100ms ease;
+}
+
+
+.shader-port__socket:hover {
+  transform:
+    scale(1.35);
+
+  background:
+    rgba(120, 175, 255, 0.85);
+
+  box-shadow:
+    0 0 12px
+      rgba(100, 165, 255, 0.8);
+}
+
+
+.shader-connections--temporary {
+  z-index: 4;
+
+  pointer-events: none;
+}
+
+
+.shader-connection--temporary {
+  stroke:
+    rgba(150, 195, 255, 0.95);
+
+  stroke-width: 2.5;
+
+  stroke-dasharray:
+    5 4;
+}

@@ -1,6 +1,6 @@
 import type {
   SelectOption,
-} from "../../experiments/experiment.types";
+} from "../experiments/experiment.types";
 
 
 interface SelectProps {

@@ -1,6 +1,6 @@
 import type {
   ShadexExperiment,
-} from "../experiment.types";
+} from "../../lab/experiments/experiment.types";
 
 import vertexShader from "./vertex.glsl?raw";
 import fragmentShader from "./fragment.glsl?raw";

@@ -1,6 +1,6 @@
 import type {
   ColorValue,
-} from "../../experiments/experiment.types";
+} from "../experiments/experiment.types";
 
 
 interface ColorPickerProps {

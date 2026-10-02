@@ -11,7 +11,7 @@ import type {
   ExperimentParameter,
   ExperimentParameterValue,
   ShadexExperiment,
-} from "../../experiments/experiment.types";
+} from "../experiments/experiment.types";
 
 import type {
   UniformType,

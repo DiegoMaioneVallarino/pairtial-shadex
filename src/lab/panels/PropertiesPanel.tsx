@@ -21,7 +21,7 @@ import {
 import type {
   ExperimentParameter,
   ExperimentParameterValue,
-} from "../../experiments/experiment.types";
+} from "../experiments/experiment.types";
 
 
 function ParameterControl({
