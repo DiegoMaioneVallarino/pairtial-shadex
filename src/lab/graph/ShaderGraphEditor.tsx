@@ -88,7 +88,12 @@ export function ShaderGraphEditor({
     ConnectionDragState | null
   >(null);
 
-
+const [
+  selectedConnectionIndex,
+  setSelectedConnectionIndex,
+] = useState<
+  number | null
+>(null);
   const dragState =
     useRef<
       DragState | null
@@ -684,11 +689,15 @@ export function ShaderGraphEditor({
         onPointerCancel={
           cancelInteraction
         }
-        onPointerDown={() =>
+       onPointerDown={() => {
   onSelectBlock(
     null,
-  )
-}
+  );
+
+  setSelectedConnectionIndex(
+    null,
+  );
+}}
       >
         <div
           className="shader-graph-grid"
@@ -696,8 +705,22 @@ export function ShaderGraphEditor({
 
 
         <GraphConnections
-          graph={graph}
-        />
+  graph={graph}
+  selectedConnectionIndex={
+    selectedConnectionIndex
+  }
+  onSelectConnection={(
+    index,
+  ) => {
+    onSelectBlock(
+      null,
+    );
+
+    setSelectedConnectionIndex(
+      index,
+    );
+  }}
+/>
 
 
         {connectionDrag && (
@@ -750,9 +773,17 @@ export function ShaderGraphEditor({
                 selectedBlockId ===
                 block.id
                 }
-                onSelect={
-                onSelectBlock
-                }
+                onSelect={(
+  blockId,
+) => {
+  setSelectedConnectionIndex(
+    null,
+  );
+
+  onSelectBlock(
+    blockId,
+  );
+}}
                         onDragStart={
                   startDragging
                 }
