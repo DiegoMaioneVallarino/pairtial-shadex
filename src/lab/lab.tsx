@@ -74,6 +74,8 @@ import "./Lab.css";
 
 import {
   energyOrbBody,
+  planetBody,
+  auroraBody,
 } from "../experiments/035-body-laboratory/bodies";
 
 import {
@@ -89,7 +91,11 @@ type ParameterValues = Record<
   string,
   ExperimentParameterValue
 >;
-
+const laboratoryBodies = [
+  energyOrbBody,
+  planetBody,
+  auroraBody,
+];
 
 function createParameterValues(
   parameters:
@@ -1213,19 +1219,53 @@ function updateGlow(
 {activeExperiment.id ===
 "035-body-laboratory" ? (
   <>
-    <span
-      className="lab__section-label"
-    >
-      BODY
-    </span>
+<span className="lab__section-label">
+  BODY
+</span>
 
-    <h2>
-      {activeBody.name}
-    </h2>
+<h2>
+  {activeBody.name}
+</h2>
 
-    <p>
-      {activeBody.domain}
-    </p>
+<p>
+  {activeBody.domain}
+</p>
+
+<div className="lab__controls">
+  <Select
+    label="Body"
+    value={
+      laboratoryBodies.findIndex(
+        (body) =>
+          body.id ===
+          activeBody.id,
+      )
+    }
+    options={
+      laboratoryBodies.map(
+        (body, index) => ({
+          label: body.name,
+          value: index,
+        }),
+      )
+    }
+    onChange={(index) => {
+      const body =
+        laboratoryBodies[index];
+
+      if (!body) {
+        return;
+      }
+
+      setActiveBody(
+        structuredClone(body),
+      );
+    }}
+  />
+</div>
+
+
+
 
 
     <span

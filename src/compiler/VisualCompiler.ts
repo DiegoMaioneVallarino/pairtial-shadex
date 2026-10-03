@@ -274,7 +274,59 @@ vec3 ${target} =
 
         break;
       }
+case "density-field": {
+  const input =
+    variable(
+      operation.input,
+    );
 
+  lines.push(`
+float ${target} =
+  noise(
+    ${input} *
+    ${floatLiteral(
+      operation.scale,
+    )}
+  );
+`);
+
+  break;
+}case "flow-coordinates": {
+  const input =
+    variable(
+      operation.input,
+    );
+
+  const time =
+    variable(
+      operation.time,
+    );
+
+  const [
+    directionX,
+    directionY,
+  ] =
+    operation.direction;
+
+  lines.push(`
+vec2 ${target} =
+  ${input} +
+  vec2(
+    ${floatLiteral(
+      directionX,
+    )},
+    ${floatLiteral(
+      directionY,
+    )}
+  ) *
+  ${time} *
+  ${floatLiteral(
+    operation.speed,
+  )};
+`);
+
+  break;
+}
 
       case "output": {
         const color =

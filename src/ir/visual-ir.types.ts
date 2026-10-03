@@ -17,9 +17,27 @@ export type VisualOperation =
     input: string;
     radius: string;
     output: "float";
+  }| {
+    id: string;
+    type: "flow-coordinates";
+    input: string;
+    time: string;
+    speed: number;
+    direction: [
+      number,
+      number,
+    ];
+    output: "vec2";
   }
 
-  
+  | {
+    id: string;
+    type: "density-field";
+    input: string;
+    scale: number;
+    detail: number;
+    output: "float";
+  }
 
   | {
       id: string;
