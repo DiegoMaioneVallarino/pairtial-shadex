@@ -36,6 +36,15 @@ import {
 } from "./controls/Toggle";
 
 import {
+  planBody,
+} from "../scene/BodyPlanner";
+
+import {
+  VisualIRPanel,
+} from "./components/VisualIRPanel/VisualIRPanel";
+
+
+import {
   ColorPicker,
 } from "./controls/ColorPicker";
 
@@ -186,12 +195,28 @@ const [
   ] = useState(1);
 
 
+
   const baseExperiment =
     experiments[
       activeExperimentIndex
     ];
 
+const activeVisualProgram =
+  useMemo(() => {
+    if (
+      baseExperiment.id !==
+      "035-body-laboratory"
+    ) {
+      return null;
+    }
 
+    return planBody(
+      activeBody,
+    );
+  }, [
+    baseExperiment.id,
+    activeBody,
+  ]);
   /*
    * Compilamos una primera versión válida.
    *
@@ -1495,6 +1520,22 @@ function updateGlow(
         },
       )}
     </div>
+    {activeVisualProgram && (
+  <div
+    style={{
+      marginTop: 20,
+      borderTop:
+        "1px solid rgba(255,255,255,.08)",
+      minHeight: 320,
+    }}
+  >
+    <VisualIRPanel
+      program={
+        activeVisualProgram
+      }
+    />
+  </div>
+)}
   </>
 ) : activeExperiment.id ===
     "034-block-graph" &&

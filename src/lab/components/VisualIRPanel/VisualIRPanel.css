@@ -1,0 +1,171 @@
+.visual-ir {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.visual-ir__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  padding: 16px;
+
+  border-bottom:
+    1px solid
+    rgba(255, 255, 255, 0.08);
+}
+
+.visual-ir__eyebrow {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+
+  color:
+    rgba(255, 255, 255, 0.35);
+}
+
+.visual-ir__header strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.visual-ir__count {
+  font-size: 10px;
+
+  color:
+    rgba(255, 255, 255, 0.4);
+}
+
+.visual-ir__operations {
+  display: flex;
+  flex-direction: column;
+
+  overflow-y: auto;
+}
+
+.visual-ir__operation {
+  display: grid;
+
+  grid-template-columns:
+    28px
+    minmax(0, 1fr)
+    auto;
+
+  gap: 8px;
+
+  align-items: start;
+
+  padding:
+    10px
+    12px;
+
+  border-bottom:
+    1px solid
+    rgba(255, 255, 255, 0.05);
+}
+
+.visual-ir__operation:hover {
+  background:
+    rgba(255, 255, 255, 0.035);
+}
+
+.visual-ir__index {
+  padding-top: 2px;
+
+  font-size: 9px;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+
+  color:
+    rgba(255, 255, 255, 0.25);
+}
+
+.visual-ir__content {
+  min-width: 0;
+}
+
+.visual-ir__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  min-width: 0;
+}
+
+.visual-ir__id {
+  overflow: hidden;
+
+  font-size: 11px;
+  font-weight: 600;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-ir__type {
+  padding:
+    2px
+    5px;
+
+  border:
+    1px solid
+    rgba(255, 255, 255, 0.08);
+
+  border-radius: 4px;
+
+  font-size: 8px;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+
+  color:
+    rgba(255, 255, 255, 0.45);
+}
+
+.visual-ir__detail {
+  overflow: hidden;
+
+  margin-top: 4px;
+
+  font-size: 9px;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+
+  color:
+    rgba(255, 255, 255, 0.35);
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-ir__output {
+  padding:
+    2px
+    5px;
+
+  border-radius: 4px;
+
+  background:
+    rgba(255, 255, 255, 0.05);
+
+  font-size: 8px;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+
+  color:
+    rgba(255, 255, 255, 0.4);
+}
