@@ -63,6 +63,18 @@ import type {
 
 import "./Lab.css";
 
+import {
+  energyOrbBody,
+} from "../experiments/035-body-laboratory/bodies";
+
+import {
+  compileBody,
+} from "../scene/BodyCompiler";
+
+import type {
+  ShadexBody,
+} from "../scene/body.types";
+
 
 type ParameterValues = Record<
   string,
@@ -150,6 +162,16 @@ export function Lab() {
       ),
   );
 
+const [
+  activeBody,
+  setActiveBody,
+] = useState<ShadexBody>(
+  () =>
+    structuredClone(
+      energyOrbBody,
+    ),
+);
+
   const [
   selectedBlockId,
   setSelectedBlockId,
@@ -223,17 +245,13 @@ export function Lab() {
    * Todos los demás experimentos siguen
    * funcionando exactamente como antes.
    */
-  const activeExperiment =
-    useMemo<ShadexExperiment>(
-      () => {
-        if (
-          baseExperiment.id !==
-          "034-block-graph"
-        ) {
-          return baseExperiment;
-        }
-
-
+const activeExperiment =
+  useMemo<ShadexExperiment>(
+    () => {
+      if (
+        baseExperiment.id ===
+        "034-block-graph"
+      ) {
         return {
           ...baseExperiment,
 
@@ -245,12 +263,27 @@ export function Lab() {
             compilation.result
               .parameters,
         };
-      },
-      [
-        baseExperiment,
-        compilation.result,
-      ],
-    );
+      }
+
+
+      if (
+        baseExperiment.id ===
+        "035-body-laboratory"
+      ) {
+        return compileBody(
+          activeBody,
+        );
+      }
+
+
+      return baseExperiment;
+    },
+    [
+      baseExperiment,
+      compilation.result,
+      activeBody,
+    ],
+  );
 
 const selectedBlock =
   shaderGraph.blocks.find(
@@ -781,6 +814,166 @@ function renderBlockParameterControl(
   );
 }
 
+function updateGeneratorRadius(
+  radius: number,
+) {
+  setActiveBody(
+    (current) => {
+      if (
+        current.generator.type !==
+        "sphere"
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+
+        generator: {
+          ...current.generator,
+
+          radius,
+        },
+      };
+    },
+  );
+}
+
+
+function updateAppearanceColor(
+  color: [
+    number,
+    number,
+    number,
+  ],
+) {
+  setActiveBody(
+    (current) => ({
+      ...current,
+
+      appearance: {
+        ...current.appearance,
+
+        color,
+      },
+    }),
+  );
+}
+
+
+function updateEmissionIntensity(
+  intensity: number,
+) {
+  setActiveBody(
+    (current) => {
+      if (
+        current.appearance.type !==
+        "emissive"
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+
+        appearance: {
+          ...current.appearance,
+
+          intensity,
+        },
+      };
+    },
+  );
+}
+
+
+function updatePulse(
+  property:
+    | "speed"
+    | "amount",
+
+  value: number,
+) {
+  setActiveBody(
+    (current) => ({
+      ...current,
+
+      dynamics:
+        current.dynamics.map(
+          (dynamic) =>
+            dynamic.type ===
+            "pulse"
+              ? {
+                  ...dynamic,
+
+                  [property]:
+                    value,
+                }
+              : dynamic,
+        ),
+    }),
+  );
+}
+
+
+function updateDistortion(
+  property:
+    | "amount"
+    | "scale",
+
+  value: number,
+) {
+  setActiveBody(
+    (current) => ({
+      ...current,
+
+      effects:
+        current.effects.map(
+          (effect) =>
+            effect.type ===
+            "distortion"
+              ? {
+                  ...effect,
+
+                  [property]:
+                    value,
+                }
+              : effect,
+        ),
+    }),
+  );
+}
+
+
+function updateGlow(
+  property:
+    | "intensity"
+    | "radius",
+
+  value: number,
+) {
+  setActiveBody(
+    (current) => ({
+      ...current,
+
+      effects:
+        current.effects.map(
+          (effect) =>
+            effect.type ===
+            "glow"
+              ? {
+                  ...effect,
+
+                  [property]:
+                    value,
+                }
+              : effect,
+        ),
+    }),
+  );
+}
+
+
   return (
     <section
       className="lab"
@@ -944,6 +1137,10 @@ function renderBlockParameterControl(
                 Graph
               </button>
             )}
+
+
+
+            
           </div>
 
 
@@ -988,11 +1185,322 @@ function renderBlockParameterControl(
           >
             EXPERIMENT
           </span>
-
 {activeExperiment.id ===
-  "034-block-graph" &&
-selectedBlock &&
-selectedBlockDefinition ? (
+"035-body-laboratory" ? (
+  <>
+    <span
+      className="lab__section-label"
+    >
+      BODY
+    </span>
+
+    <h2>
+      {activeBody.name}
+    </h2>
+
+    <p>
+      {activeBody.domain}
+    </p>
+
+
+    <span
+      className="lab__section-label"
+    >
+      GENERATOR
+    </span>
+
+    <div
+      className="lab__controls"
+    >
+      <div
+        className="lab__property"
+      >
+        <span>
+          Type
+        </span>
+
+        <strong>
+          {activeBody.generator.type}
+        </strong>
+      </div>
+
+
+      {activeBody.generator.type ===
+        "sphere" && (
+        <Slider
+          label="Radius"
+          value={
+            activeBody.generator
+              .radius
+          }
+          min={0.2}
+          max={1.5}
+          step={0.01}
+          onChange={
+            updateGeneratorRadius
+          }
+        />
+      )}
+    </div>
+
+
+    <span
+      className="lab__section-label"
+    >
+      APPEARANCE
+    </span>
+
+    <div
+      className="lab__controls"
+    >
+      <ColorPicker
+        label="Color"
+        value={
+          activeBody.appearance
+            .color
+        }
+        onChange={
+          updateAppearanceColor
+        }
+      />
+
+
+      {activeBody.appearance.type ===
+        "emissive" && (
+        <Slider
+          label="Emission"
+          value={
+            activeBody.appearance
+              .intensity
+          }
+          min={0}
+          max={4}
+          step={0.01}
+          onChange={
+            updateEmissionIntensity
+          }
+        />
+      )}
+    </div>
+
+
+    <span
+      className="lab__section-label"
+    >
+      DYNAMICS
+    </span>
+
+    <div
+      className="lab__controls"
+    >
+      {activeBody.dynamics.map(
+        (dynamic, index) => {
+          if (
+            dynamic.type !==
+            "pulse"
+          ) {
+            return null;
+          }
+
+          return (
+            <div
+              key={index}
+            >
+              <div
+                className="lab__property"
+              >
+                <span>
+                  Dynamic
+                </span>
+
+                <strong>
+                  Pulse
+                </strong>
+              </div>
+
+              <Slider
+                label="Speed"
+                value={
+                  dynamic.speed
+                }
+                min={0}
+                max={5}
+                step={0.01}
+                onChange={(
+                  value,
+                ) =>
+                  updatePulse(
+                    "speed",
+                    value,
+                  )
+                }
+              />
+
+              <Slider
+                label="Amount"
+                value={
+                  dynamic.amount
+                }
+                min={0}
+                max={0.5}
+                step={0.01}
+                onChange={(
+                  value,
+                ) =>
+                  updatePulse(
+                    "amount",
+                    value,
+                  )
+                }
+              />
+            </div>
+          );
+        },
+      )}
+    </div>
+
+
+    <span
+      className="lab__section-label"
+    >
+      EFFECTS
+    </span>
+
+    <div
+      className="lab__controls"
+    >
+      {activeBody.effects.map(
+        (effect, index) => {
+          if (
+            effect.type ===
+            "distortion"
+          ) {
+            return (
+              <div
+                key={index}
+              >
+                <div
+                  className="lab__property"
+                >
+                  <span>
+                    Effect
+                  </span>
+
+                  <strong>
+                    Distortion
+                  </strong>
+                </div>
+
+                <Slider
+                  label="Amount"
+                  value={
+                    effect.amount
+                  }
+                  min={0}
+                  max={0.5}
+                  step={0.01}
+                  onChange={(
+                    value,
+                  ) =>
+                    updateDistortion(
+                      "amount",
+                      value,
+                    )
+                  }
+                />
+
+                <Slider
+                  label="Scale"
+                  value={
+                    effect.scale
+                  }
+                  min={0.5}
+                  max={12}
+                  step={0.1}
+                  onChange={(
+                    value,
+                  ) =>
+                    updateDistortion(
+                      "scale",
+                      value,
+                    )
+                  }
+                />
+              </div>
+            );
+          }
+
+
+          if (
+            effect.type ===
+            "glow"
+          ) {
+            return (
+              <div
+                key={index}
+              >
+                <div
+                  className="lab__property"
+                >
+                  <span>
+                    Effect
+                  </span>
+
+                  <strong>
+                    Glow
+                  </strong>
+                </div>
+
+                <Slider
+                  label="Intensity"
+                  value={
+                    effect.intensity
+                  }
+                  min={0}
+                  max={4}
+                  step={0.01}
+                  onChange={(
+                    value,
+                  ) =>
+                    updateGlow(
+                      "intensity",
+                      value,
+                    )
+                  }
+                />
+
+                <Slider
+                  label="Radius"
+                  value={
+                    effect.radius
+                  }
+                  min={0.05}
+                  max={1}
+                  step={0.01}
+                  onChange={(
+                    value,
+                  ) =>
+                    updateGlow(
+                      "radius",
+                      value,
+                    )
+                  }
+                />
+              </div>
+            );
+          }
+
+
+          return null;
+        },
+      )}
+    </div>
+  </>
+) : activeExperiment.id ===
+    "034-block-graph" &&
+  selectedBlock &&
+  selectedBlockDefinition ? (
+
   <>
     <span
       className="lab__section-label"

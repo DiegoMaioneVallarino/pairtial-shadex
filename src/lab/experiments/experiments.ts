@@ -126,6 +126,9 @@ import {
   blockGraphExperiment,
 } from "../../experiments/034-block-graph/experiment";
 
+import {
+  bodyLaboratoryExperiment,
+} from "../../experiments/035-body-laboratory/experiment";
 
 export const experiments = [
   gradientExperiment,
@@ -160,4 +163,5 @@ export const experiments = [
   fractalLightTunnelExperiment,
   proceduralPlanetExperiment,
   blockGraphExperiment,
+   bodyLaboratoryExperiment,
 ];

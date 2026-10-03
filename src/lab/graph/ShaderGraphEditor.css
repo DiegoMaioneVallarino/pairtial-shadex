@@ -439,3 +439,55 @@
   stroke-dasharray:
     5 4;
 }
+
+.shader-connection-hit-area {
+  fill: none;
+
+  stroke:
+    transparent;
+
+  stroke-width:
+    14px;
+
+  pointer-events:
+    stroke;
+
+  cursor:
+    pointer;
+}
+
+
+.shader-connection {
+  pointer-events:
+    none;
+
+  transition:
+    stroke 100ms ease,
+    stroke-width 100ms ease,
+    filter 100ms ease;
+}
+
+
+.shader-connection--selected {
+  stroke:
+    rgba(
+      145,
+      195,
+      255,
+      1
+    );
+
+  stroke-width:
+    3px;
+
+  filter:
+    drop-shadow(
+      0 0 5px
+      rgba(
+        100,
+        165,
+        255,
+        0.7
+      )
+    );
+}

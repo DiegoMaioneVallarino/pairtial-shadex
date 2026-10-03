@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -188,21 +189,171 @@ const [
     };
 
 
-    onChange({
-      ...graph,
+   onChange({
+  ...graph,
 
-      blocks: [
-        ...graph.blocks,
-        newBlock,
-      ],
-    });
+  blocks: [
+    ...graph.blocks,
+    newBlock,
+  ],
+});
 
 
-   onSelectBlock(
+setSelectedConnectionIndex(
+  null,
+);
+
+
+onSelectBlock(
   id,
 );
   }
 
+
+  useEffect(() => {
+  function handleKeyDown(
+    event: KeyboardEvent,
+  ) {
+    if (
+      event.key !==
+        "Delete" &&
+      event.key !==
+        "Backspace"
+    ) {
+      return;
+    }
+
+
+    /*
+     * Nunca borrar elementos del
+     * grafo mientras el usuario está
+     * escribiendo/editando un control.
+     */
+    const target =
+      event.target;
+
+
+    if (
+      target instanceof
+        HTMLInputElement ||
+      target instanceof
+        HTMLTextAreaElement ||
+      target instanceof
+        HTMLSelectElement ||
+      (
+        target instanceof
+          HTMLElement &&
+        target.isContentEditable
+      )
+    ) {
+      return;
+    }
+
+
+    /*
+     * DELETE CONNECTION
+     */
+    if (
+      selectedConnectionIndex !==
+      null
+    ) {
+      event.preventDefault();
+
+
+      onChange({
+        ...graph,
+
+        connections:
+          graph.connections.filter(
+            (
+              _,
+              index,
+            ) =>
+              index !==
+              selectedConnectionIndex,
+          ),
+      });
+
+
+      setSelectedConnectionIndex(
+        null,
+      );
+
+
+      return;
+    }
+
+
+    /*
+     * DELETE BLOCK
+     */
+    if (
+      selectedBlockId
+    ) {
+      event.preventDefault();
+
+
+      const blockId =
+        selectedBlockId;
+
+
+      onChange({
+        ...graph,
+
+        blocks:
+          graph.blocks.filter(
+            (block) =>
+              block.id !==
+              blockId,
+          ),
+
+        /*
+         * Todas las conexiones que
+         * entraban o salían del nodo
+         * también desaparecen.
+         */
+        connections:
+          graph.connections.filter(
+            (connection) =>
+              connection.from.block !==
+                blockId &&
+              connection.to.block !==
+                blockId,
+          ),
+      });
+
+
+      onSelectBlock(
+        null,
+      );
+
+
+      setSelectedConnectionIndex(
+        null,
+      );
+    }
+  }
+
+
+  window.addEventListener(
+    "keydown",
+    handleKeyDown,
+  );
+
+
+  return () => {
+    window.removeEventListener(
+      "keydown",
+      handleKeyDown,
+    );
+  };
+}, [
+  graph,
+  onChange,
+  onSelectBlock,
+  selectedBlockId,
+  selectedConnectionIndex,
+]);
 
   function startDragging(
     blockId: string,
