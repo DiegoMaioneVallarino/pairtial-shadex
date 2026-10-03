@@ -12,21 +12,14 @@ export type VisualOperation =
     }
 
   | {
-      id: string;
-      type: "sphere-distance";
-      input: string;
-      radius: number;
-      output: "float";
-    }
+    id: string;
+    type: "sphere-distance";
+    input: string;
+    radius: string;
+    output: "float";
+  }
 
-  | {
-      id: string;
-      type: "pulse";
-      input: string;
-      speed: number;
-      amount: number;
-      output: "float";
-    }
+  
 
   | {
       id: string;
@@ -66,13 +59,48 @@ export type VisualOperation =
       intensity: number;
       radius: number;
       output: "color";
-    }
+    }| {
+    id: string;
+    type: "constant";
+    value: number;
+    output: "float";
+  }
+
+| {
+    id: string;
+    type: "time";
+    output: "float";
+  }
+
+| {
+    id: string;
+    type: "multiply";
+    a: string;
+    b: string;
+    output: "float";
+  }
+
+| {
+    id: string;
+    type: "add";
+    a: string;
+    b: string;
+    output: "float";
+  }
+
+| {
+    id: string;
+    type: "sin";
+    input: string;
+    output: "float";
+  }
 
   | {
       id: string;
       type: "output";
       color: string;
     };
+    
 
 export interface VisualProgram {
   operations: VisualOperation[];

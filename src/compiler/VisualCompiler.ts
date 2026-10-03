@@ -71,41 +71,102 @@ ${target}.x *=
   break;
 }
 
+case "sphere-distance": {
+  const input =
+    variable(
+      operation.input,
+    );
 
-      case "sphere-distance": {
-        const input =
-          variable(
-            operation.input,
-          );
+  const radius =
+    variable(
+      operation.radius,
+    );
 
-        lines.push(`
+  lines.push(`
 float ${target} =
   length(${input}) -
-  ${floatLiteral(
-    operation.radius,
-  )};
+  ${radius};
 `);
 
-        break;
-      }
+  break;
+}
 
 
-      case "pulse": {
-        lines.push(`
+     case "constant": {
+  lines.push(`
 float ${target} =
-  sin(
-    u_time *
-    ${floatLiteral(
-      operation.speed,
-    )}
-  ) *
   ${floatLiteral(
-    operation.amount,
+    operation.value,
   )};
 `);
 
-        break;
-      }
+  break;
+}
+
+
+case "time": {
+  lines.push(`
+float ${target} =
+  u_time;
+`);
+
+  break;
+}
+
+
+case "multiply": {
+  const a =
+    variable(
+      operation.a,
+    );
+
+  const b =
+    variable(
+      operation.b,
+    );
+
+  lines.push(`
+float ${target} =
+  ${a} * ${b};
+`);
+
+  break;
+}
+
+
+case "add": {
+  const a =
+    variable(
+      operation.a,
+    );
+
+  const b =
+    variable(
+      operation.b,
+    );
+
+  lines.push(`
+float ${target} =
+  ${a} + ${b};
+`);
+
+  break;
+}
+
+
+case "sin": {
+  const input =
+    variable(
+      operation.input,
+    );
+
+  lines.push(`
+float ${target} =
+  sin(${input});
+`);
+
+  break;
+}
 
 
       case "distort-distance": {

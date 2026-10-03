@@ -29,42 +29,124 @@ export function planBody(
    * GENERATOR
    */
   if (
-    body.generator.type ===
-    "sphere"
-  ) {
-    let radiusSource =
-      body.generator.radius;
+  body.generator.type ===
+  "sphere"
+) {
+  /*
+   * El radio base ya es un valor
+   * dentro del programa.
+   */
+  operations.push({
+    id: "base-radius",
+    type: "constant",
+    value:
+      body.generator.radius,
+    output: "float",
+  });
 
-    const pulse =
-      body.dynamics.find(
-        (dynamic) =>
-          dynamic.type ===
-          "pulse",
-      );
 
-    if (pulse) {
-      operations.push({
-        id: "pulse",
-        type: "pulse",
-        input: "coordinates",
-        speed: pulse.speed,
-        amount: pulse.amount,
-        output: "float",
-      });
-    }
+  /*
+   * Por defecto la esfera utiliza
+   * directamente su radio base.
+   */
+  let radiusSource =
+    "base-radius";
 
+
+  /*
+   * Pulse es semántica de alto nivel.
+   *
+   * Aquí deja de existir como concepto
+   * y se expande a matemáticas.
+   */
+  const pulse =
+    body.dynamics.find(
+      (dynamic) =>
+        dynamic.type ===
+        "pulse",
+    );
+
+
+  if (pulse) {
     operations.push({
-      id: "geometry",
-      type: "sphere-distance",
-      input: "coordinates",
-      radius: radiusSource,
+      id: "time",
+      type: "time",
       output: "float",
     });
-  } else {
-    throw new Error(
-      `Unsupported generator: ${body.generator.type}`,
-    );
+
+
+    operations.push({
+      id: "pulse-speed",
+      type: "constant",
+      value:
+        pulse.speed,
+      output: "float",
+    });
+
+
+    operations.push({
+      id: "pulse-phase",
+      type: "multiply",
+      a: "time",
+      b: "pulse-speed",
+      output: "float",
+    });
+
+
+    operations.push({
+      id: "pulse-wave",
+      type: "sin",
+      input:
+        "pulse-phase",
+      output: "float",
+    });
+
+
+    operations.push({
+      id: "pulse-amount",
+      type: "constant",
+      value:
+        pulse.amount,
+      output: "float",
+    });
+
+
+    operations.push({
+      id: "pulse-offset",
+      type: "multiply",
+      a: "pulse-wave",
+      b: "pulse-amount",
+      output: "float",
+    });
+
+
+    operations.push({
+      id: "animated-radius",
+      type: "add",
+      a: "base-radius",
+      b: "pulse-offset",
+      output: "float",
+    });
+
+
+    radiusSource =
+      "animated-radius";
   }
+
+
+  operations.push({
+    id: "geometry",
+    type: "sphere-distance",
+    input: "coordinates",
+    radius:
+      radiusSource,
+    output: "float",
+  });
+} else {
+  throw new Error(
+    `Unsupported generator: ${body.generator.type}`,
+  );
+}
 
 
   /*
