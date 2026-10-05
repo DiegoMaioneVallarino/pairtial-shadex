@@ -103,66 +103,63 @@ export const planetBody:
   };
 
 
-export const auroraBody:
-  ShadexBody = {
-    id: "aurora",
+export const auroraBody: ShadexBody = {
+  id: "aurora",
+  name: "Aurora",
 
-    name: "Aurora",
+  domain: "volume",
 
-    domain: "volume",
+  generator: {
+    type: "density-field",
+    shape: "bands",
+    scale: 2.5,
+    detail: 4,
+    sharpness: 2.4,
+  },
 
-    generator: {
-  type: "density-field",
-  shape: "bands",
-  scale: 2.5,
-  detail: 4,
-  sharpness: 2.4,
-},
+  envelope: {
+    type: "vertical",
+    center: 0,
+    width: 0.72,
+    softness: 0.35,
+  },
 
-    appearance: {
-      type: "emissive",
+  appearance: {
+    type: "emissive",
+    color: [
+      0.15,
+      1.0,
+      0.65,
+    ],
+    intensity: 1.5,
+  },
 
-      color: [
-        0.15,
+  dynamics: [
+    {
+      type: "flow",
+      speed: 0.25,
+      direction: [
         1.0,
-        0.65,
+        0.2,
+        0.0,
       ],
+    },
+  ],
 
-      intensity: 1.5,
+  effects: [
+    {
+      type: "turbulence",
+      amount: 0.65,
+      detail: 3,
     },
 
-    dynamics: [
-      {
-        type: "flow",
-
-        speed: 0.25,
-
-        direction: [
-          1.0,
-          0.2,
-          0.0,
-        ],
-      },
-    ],
-
-    effects: [
-      {
-        type: "turbulence",
-
-        amount: 0.65,
-
-        detail: 3.0,
-      },
-
-      {
-        type: "glow",
-
-        intensity: 0.9,
-
-        radius: 0.25,
-      },
-    ],
-  };
+    {
+      type: "glow",
+      intensity: 0.9,
+      radius: 0.25,
+    },
+  ],
+};
 
 
 export const bodyPresets = [

@@ -300,7 +300,7 @@ case "density-field": {
     octave += 1
   ) {
     octaveLines.push(`
-${target} +=
+${target}_noise +=
   noise(
     ${input} *
     ${floatLiteral(
@@ -318,13 +318,103 @@ ${target} +=
   }
 
   lines.push(`
-float ${target} = 0.0;
+float ${target}_noise = 0.0;
 
 ${octaveLines.join("\n")}
 `);
 
+  switch (operation.shape) {
+    case "uniform": {
+      lines.push(`
+float ${target} =
+  pow(
+    clamp(
+      ${target}_noise,
+      0.0,
+      1.0
+    ),
+    ${floatLiteral(
+      operation.sharpness,
+    )}
+  );
+`);
+
+      break;
+    }
+
+    case "bands": {
+      lines.push(`
+float ${target}_bands =
+  abs(
+    sin(
+      ${input}.x *
+      ${floatLiteral(
+        operation.scale,
+      )} *
+      3.14159265
+    )
+  );
+
+float ${target} =
+  pow(
+    clamp(
+      ${target}_bands *
+      ${target}_noise,
+      0.0,
+      1.0
+    ),
+    ${floatLiteral(
+      operation.sharpness,
+    )}
+  );
+`);
+
+      break;
+    }
+  }
+
   break;
-}case "flow-coordinates": {
+}case "vertical-envelope": {
+  const coordinates =
+    variable(
+      operation.coordinates,
+    );
+
+  const input =
+    variable(
+      operation.input,
+    );
+
+  lines.push(`
+float ${target}_distance =
+  abs(
+    ${coordinates}.x -
+    ${floatLiteral(
+      operation.center,
+    )}
+  );
+
+float ${target}_mask =
+  1.0 -
+  smoothstep(
+    ${floatLiteral(
+      operation.width,
+    )},
+    ${floatLiteral(
+      operation.width +
+        operation.softness,
+    )},
+    ${target}_distance
+  );
+
+float ${target} =
+  ${input} *
+  ${target}_mask;
+`);
+
+  break;
+}
+case "flow-coordinates": {
   const input =
     variable(
       operation.input,

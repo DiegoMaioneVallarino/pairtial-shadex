@@ -321,7 +321,41 @@ if (
   presenceSource =
     representationSource;
 }
+/*
+ * ENVELOPE
+ *
+ * Limita espacialmente la
+ * presencia del Body.
+ */
+if (
+  body.envelope?.type ===
+  "vertical"
+) {
+  operations.push({
+    id: "envelope",
+    type: "vertical-envelope",
 
+    coordinates:
+      coordinateSource,
+
+    input:
+      presenceSource,
+
+    center:
+      body.envelope.center,
+
+    width:
+      body.envelope.width,
+
+    softness:
+      body.envelope.softness,
+
+    output: "float",
+  });
+
+  presenceSource =
+    "envelope";
+}
 
   /*
    * APPEARANCE

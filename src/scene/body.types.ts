@@ -5,7 +5,21 @@ export type BodyDomain =
   | "surface"
   | "volume";
 
-
+export type BodyEnvelope =
+  | {
+      type: "none";
+    }
+  | {
+      type: "vertical";
+      center: number;
+      width: number;
+      softness: number;
+    }
+  | {
+      type: "radial";
+      radius: number;
+      softness: number;
+    };
 export type BodyGenerator =
   | {
       type: "sphere";
@@ -100,16 +114,15 @@ export type BodyEffect =
 
 export interface ShadexBody {
   id: string;
-
   name: string;
 
   domain: BodyDomain;
 
   generator: BodyGenerator;
+  envelope?: BodyEnvelope;
 
   appearance: BodyAppearance;
 
   dynamics: BodyDynamic[];
-
   effects: BodyEffect[];
 }

@@ -35,6 +35,15 @@ export type VisualOperation =
       number,
     ];
     output: "vec2";
+  }| {
+    id: string;
+    type: "vertical-envelope";
+    coordinates: string;
+    input: string;
+    center: number;
+    width: number;
+    softness: number;
+    output: "float";
   }
 
  | {
