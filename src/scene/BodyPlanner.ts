@@ -204,17 +204,27 @@ switch (body.generator.type) {
   }
 
   case "density-field": {
-    operations.push({
-      id: "density",
-      type: "density-field",
-input:
-  coordinateSource,
-        scale:
-        body.generator.scale,
-      detail:
-        body.generator.detail,
-      output: "float",
-    });
+ operations.push({
+  id: "density",
+  type: "density-field",
+
+  input:
+    coordinateSource,
+
+  shape:
+    body.generator.shape,
+
+  scale:
+    body.generator.scale,
+
+  detail:
+    body.generator.detail,
+
+  sharpness:
+    body.generator.sharpness,
+
+  output: "float",
+});
 
     geometrySource =
       "density";

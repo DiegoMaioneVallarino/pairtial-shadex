@@ -112,12 +112,12 @@ export const auroraBody:
     domain: "volume",
 
     generator: {
-      type: "density-field",
-
-      scale: 2.5,
-
-      detail: 4.0,
-    },
+  type: "density-field",
+  shape: "bands",
+  scale: 2.5,
+  detail: 4,
+  sharpness: 2.4,
+},
 
     appearance: {
       type: "emissive",

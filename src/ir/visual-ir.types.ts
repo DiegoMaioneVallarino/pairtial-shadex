@@ -37,12 +37,20 @@ export type VisualOperation =
     output: "vec2";
   }
 
-  | {
+ | {
     id: string;
     type: "density-field";
+
     input: string;
+
+    shape:
+      | "uniform"
+      | "bands";
+
     scale: number;
     detail: number;
+    sharpness: number;
+
     output: "float";
   }
 
