@@ -110,12 +110,11 @@ export type BodyEffect =
       scale: number;
     }
   | {
-      type: "turbulence";
-
-      amount: number;
-
-      detail: number;
-    }
+  type: "turbulence";
+  amount: number;
+  detail: number;
+  speed: number;
+}
   | {
       type: "glow";
 

@@ -413,6 +413,51 @@ float ${target} =
 `);
 
   break;
+}case "radial-envelope": {
+  const coordinates =
+    variable(
+      operation.coordinates,
+    );
+
+  const input =
+    variable(
+      operation.input,
+    );
+
+  const [
+    centerX,
+    centerY,
+  ] = operation.center;
+
+  lines.push(`
+float ${target}_distance =
+  length(
+    ${coordinates} -
+    vec2(
+      ${floatLiteral(centerX)},
+      ${floatLiteral(centerY)}
+    )
+  );
+
+float ${target}_mask =
+  1.0 -
+  smoothstep(
+    ${floatLiteral(
+      operation.radius,
+    )},
+    ${floatLiteral(
+      operation.radius +
+        operation.softness,
+    )},
+    ${target}_distance
+  );
+
+float ${target} =
+  ${input} *
+  ${target}_mask;
+`);
+
+  break;
 }
 case "flow-coordinates": {
   const input =
@@ -456,6 +501,11 @@ case "turbulence-coordinates": {
       operation.input,
     );
 
+  const time =
+    variable(
+      operation.time,
+    );
+
   const scale =
     Math.max(
       1,
@@ -463,17 +513,32 @@ case "turbulence-coordinates": {
     );
 
   lines.push(`
-vec2 ${target}_noise = vec2(
-  noise(
-    ${input} *
-    ${floatLiteral(scale)}
-  ),
-  noise(
-    ${input} *
-    ${floatLiteral(scale)} +
-    vec2(37.2, 91.7)
-  )
-);
+float ${target}_time =
+  ${time} *
+  ${floatLiteral(
+    operation.speed,
+  )};
+
+vec2 ${target}_noise =
+  vec2(
+    noise(
+      ${input} *
+      ${floatLiteral(scale)} +
+      vec2(
+        ${target}_time,
+        ${target}_time * 0.37
+      )
+    ),
+
+    noise(
+      ${input} *
+      ${floatLiteral(scale)} +
+      vec2(
+        37.2 - ${target}_time * 0.21,
+        91.7 + ${target}_time
+      )
+    )
+  );
 
 vec2 ${target} =
   ${input} +

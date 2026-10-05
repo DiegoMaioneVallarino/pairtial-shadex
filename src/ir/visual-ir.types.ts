@@ -12,9 +12,14 @@ export type VisualOperation =
     }| {
     id: string;
     type: "turbulence-coordinates";
+
     input: string;
+    time: string;
+
     amount: number;
     detail: number;
+    speed: number;
+
     output: "vec2";
   }
 
@@ -43,6 +48,22 @@ export type VisualOperation =
     center: number;
     width: number;
     softness: number;
+    output: "float";
+  }| {
+    id: string;
+    type: "radial-envelope";
+
+    coordinates: string;
+    input: string;
+
+    center: [
+      number,
+      number,
+    ];
+
+    radius: number;
+    softness: number;
+
     output: "float";
   }
 

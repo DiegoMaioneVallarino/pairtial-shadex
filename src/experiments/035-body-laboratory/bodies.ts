@@ -117,26 +117,22 @@ export const auroraBody: ShadexBody = {
     sharpness: 2.4,
   },
 
- envelope: {
-  region: {
-    type: "vertical",
-    center: 0,
-    width: 0.72,
-  },
+  envelope: {
+    region: {
+      type: "vertical",
+      center: 0,
+      width: 0.72,
+    },
 
-  falloff: {
-    type: "smooth",
-    softness: 0.35,
+    falloff: {
+      type: "smooth",
+      softness: 0.35,
+    },
   },
-},
 
   appearance: {
     type: "emissive",
-    color: [
-      0.15,
-      1.0,
-      0.65,
-    ],
+    color: [0.15, 1.0, 0.65],
     intensity: 1.5,
   },
 
@@ -157,6 +153,7 @@ export const auroraBody: ShadexBody = {
       type: "turbulence",
       amount: 0.65,
       detail: 3,
+      speed: 0.18, // ← NUEVO
     },
 
     {
@@ -167,8 +164,77 @@ export const auroraBody: ShadexBody = {
   ],
 };
 
+export const nebulaBody:
+  ShadexBody = {
+    id: "nebula",
 
-export const bodyPresets = [
+    name: "Nebula",
+
+    domain: "volume",
+
+    generator: {
+      type: "density-field",
+      shape: "uniform",
+      scale: 2.2,
+      detail: 5,
+      sharpness: 1.7,
+    },
+
+    envelope: {
+      region: {
+        type: "radial",
+
+        center: [
+          0,
+          0,
+        ],
+
+        radius: 0.55,
+      },
+
+      falloff: {
+        type: "smooth",
+        softness: 0.45,
+      },
+    },
+
+    appearance: {
+      type: "emissive",
+
+      color: [
+        0.55,
+        0.25,
+        1.0,
+      ],
+
+      intensity: 1.6,
+    },
+
+    dynamics: [
+      {
+        type: "flow",
+
+        speed: 0.08,
+
+        direction: [
+          0.25,
+          0.08,
+          0,
+        ],
+      },
+    ],
+
+    effects: [
+  {
+    type: "turbulence",
+
+    amount: 0.35,
+    detail: 3,
+    speed: 0.1,
+  },
+],
+  };
+const laboratoryBodies = [
   energyOrbBody,
   planetBody,
   auroraBody,

@@ -84,15 +84,37 @@ const turbulence =
   );
 
 if (turbulence) {
+  /*
+   * Turbulence necesita su propio
+   * acceso al tiempo porque no solo
+   * desplaza el espacio:
+   * hace evolucionar su deformación.
+   */
+  operations.push({
+    id: "turbulence-time",
+    type: "time",
+    output: "float",
+  });
+
   operations.push({
     id: "turbulence-coordinates",
     type: "turbulence-coordinates",
+
     input:
       coordinateSource,
+
+    time:
+      "turbulence-time",
+
     amount:
       turbulence.amount,
+
     detail:
       turbulence.detail,
+
+    speed:
+      turbulence.speed,
+
     output: "vec2",
   });
 
@@ -364,7 +386,43 @@ if (
   presenceSource =
     "envelope";
 }
+if (
+  body.envelope?.region.type ===
+  "radial"
+) {
+  const region =
+    body.envelope.region;
 
+  const falloff =
+    body.envelope.falloff;
+
+  operations.push({
+    id: "envelope",
+    type: "radial-envelope",
+
+    coordinates:
+      coordinateSource,
+
+    input:
+      presenceSource,
+
+    center:
+      region.center,
+
+    radius:
+      region.radius,
+
+    softness:
+      falloff.type === "smooth"
+        ? falloff.softness
+        : 0,
+
+    output: "float",
+  });
+
+  presenceSource =
+    "envelope";
+}
   /*
    * APPEARANCE
    */
