@@ -170,12 +170,12 @@ float ${target} =
 
 
       case "distort-distance": {
-        const input =
-          variable(
-            operation.input,
-          );
+  const input =
+    variable(
+      operation.input,
+    );
 
-        lines.push(`
+  lines.push(`
 float ${target} =
   ${input} -
   (
@@ -192,8 +192,8 @@ float ${target} =
   )};
 `);
 
-        break;
-      }
+  break;
+}
 
 
       case "body-mask": {

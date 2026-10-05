@@ -85,13 +85,17 @@ export type VisualOperation =
   }
 
   | {
-      id: string;
-      type: "distort-distance";
-      input: string;
-      amount: number;
-      scale: number;
-      output: "float";
-    }
+    id: string;
+    type: "distort-distance";
+
+    input: string;
+    coordinates: string;
+
+    amount: number;
+    scale: number;
+
+    output: "float";
+  }
 
   | {
       id: string;
