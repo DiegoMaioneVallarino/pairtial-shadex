@@ -12,13 +12,17 @@ export type BodyGenerator =
 
       radius: number;
     }
-  | {
-      type: "density-field";
+ | {
+    type: "density-field";
 
-      scale: number;
+    shape:
+      | "uniform"
+      | "bands";
 
-      detail: number;
-    };
+    scale: number;
+    detail: number;
+    sharpness: number;
+  }
 
 
 export type BodyAppearance =

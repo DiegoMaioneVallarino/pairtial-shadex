@@ -9,7 +9,14 @@ export type VisualOperation =
       id: string;
       type: "coordinates";
       output: "vec2";
-    }
+    }| {
+    id: string;
+    type: "turbulence-coordinates";
+    input: string;
+    amount: number;
+    detail: number;
+    output: "vec2";
+  }
 
   | {
     id: string;

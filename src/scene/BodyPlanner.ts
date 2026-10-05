@@ -69,7 +69,36 @@ if (flow) {
   coordinateSource =
     "flow-coordinates";
 }
+/*
+ * SPATIAL EFFECTS
+ *
+ * Turbulence deforma el espacio
+ * antes de que el generator
+ * evalúe el Body.
+ */
+const turbulence =
+  body.effects.find(
+    (effect) =>
+      effect.type ===
+      "turbulence",
+  );
 
+if (turbulence) {
+  operations.push({
+    id: "turbulence-coordinates",
+    type: "turbulence-coordinates",
+    input:
+      coordinateSource,
+    amount:
+      turbulence.amount,
+    detail:
+      turbulence.detail,
+    output: "vec2",
+  });
+
+  coordinateSource =
+    "turbulence-coordinates";
+}
 
 /*
  * GENERATOR

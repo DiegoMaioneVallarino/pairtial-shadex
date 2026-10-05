@@ -280,14 +280,47 @@ case "density-field": {
       operation.input,
     );
 
-  lines.push(`
-float ${target} =
+  const detail =
+    Math.max(
+      1,
+      Math.floor(
+        operation.detail,
+      ),
+    );
+
+  const octaveLines:
+    string[] = [];
+
+  let amplitude = 0.5;
+  let frequency = 1;
+
+  for (
+    let octave = 0;
+    octave < detail;
+    octave += 1
+  ) {
+    octaveLines.push(`
+${target} +=
   noise(
     ${input} *
     ${floatLiteral(
-      operation.scale,
+      operation.scale *
+        frequency,
     )}
-  );
+  ) *
+  ${floatLiteral(
+    amplitude,
+  )};
+`);
+
+    frequency *= 2;
+    amplitude *= 0.5;
+  }
+
+  lines.push(`
+float ${target} = 0.0;
+
+${octaveLines.join("\n")}
 `);
 
   break;
@@ -327,7 +360,44 @@ vec2 ${target} =
 
   break;
 }
+case "turbulence-coordinates": {
+  const input =
+    variable(
+      operation.input,
+    );
 
+  const scale =
+    Math.max(
+      1,
+      operation.detail,
+    );
+
+  lines.push(`
+vec2 ${target}_noise = vec2(
+  noise(
+    ${input} *
+    ${floatLiteral(scale)}
+  ),
+  noise(
+    ${input} *
+    ${floatLiteral(scale)} +
+    vec2(37.2, 91.7)
+  )
+);
+
+vec2 ${target} =
+  ${input} +
+  (
+    ${target}_noise -
+    0.5
+  ) *
+  ${floatLiteral(
+    operation.amount,
+  )};
+`);
+
+  break;
+}
       case "output": {
         const color =
           variable(
