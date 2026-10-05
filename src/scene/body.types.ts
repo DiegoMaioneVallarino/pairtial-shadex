@@ -5,21 +5,34 @@ export type BodyDomain =
   | "surface"
   | "volume";
 
-export type BodyEnvelope =
-  | {
-      type: "none";
-    }
+export type EnvelopeRegion =
   | {
       type: "vertical";
       center: number;
       width: number;
-      softness: number;
     }
   | {
       type: "radial";
+      center: [
+        number,
+        number,
+      ];
       radius: number;
+    };
+
+export type EnvelopeFalloff =
+  | {
+      type: "hard";
+    }
+  | {
+      type: "smooth";
       softness: number;
     };
+
+export interface BodyEnvelope {
+  region: EnvelopeRegion;
+  falloff: EnvelopeFalloff;
+}
 export type BodyGenerator =
   | {
       type: "sphere";

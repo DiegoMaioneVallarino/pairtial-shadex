@@ -117,12 +117,18 @@ export const auroraBody: ShadexBody = {
     sharpness: 2.4,
   },
 
-  envelope: {
+ envelope: {
+  region: {
     type: "vertical",
     center: 0,
     width: 0.72,
+  },
+
+  falloff: {
+    type: "smooth",
     softness: 0.35,
   },
+},
 
   appearance: {
     type: "emissive",

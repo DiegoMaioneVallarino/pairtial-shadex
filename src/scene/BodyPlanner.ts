@@ -328,9 +328,15 @@ if (
  * presencia del Body.
  */
 if (
-  body.envelope?.type ===
+  body.envelope?.region.type ===
   "vertical"
 ) {
+  const region =
+    body.envelope.region;
+
+  const falloff =
+    body.envelope.falloff;
+
   operations.push({
     id: "envelope",
     type: "vertical-envelope",
@@ -342,13 +348,15 @@ if (
       presenceSource,
 
     center:
-      body.envelope.center,
+      region.center,
 
     width:
-      body.envelope.width,
+      region.width,
 
     softness:
-      body.envelope.softness,
+      falloff.type === "smooth"
+        ? falloff.softness
+        : 0,
 
     output: "float",
   });
