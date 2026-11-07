@@ -208,6 +208,119 @@ function addLight(dst: number[], src: [number, number, number, number], strength
   const a = Math.max(0, src[3] * strength);
   for (let i = 0; i < 3; i++) dst[i] += src[i] * a;
 }
+// Spatial emitters are sampled in object coordinates, not angular sectors.
+// A light is projected onto the actual silhouette and that SAME contour sample
+// drives rim, inward scattering, outer halo and background bounce.
+type SpatialLight = {
+  id: number; kind: 'radial' | 'linear'; enabled: boolean;
+  x: number; y: number; angle: number; radius: number; aspect: number;
+  intensity: number; color: string;
+};
+const defaultLights: SpatialLight[] = [
+  { id: 1, kind: 'radial', enabled: true, x: -0.65, y: -0.55, angle: 0, radius: 1.05, aspect: 0.85, intensity: 1.2, color: '#b8eaff' },
+  { id: 2, kind: 'linear', enabled: true, x: 0.52, y: 0.05, angle: -0.55, radius: 0.42, aspect: 1, intensity: 0.75, color: '#8d8cff' },
+];
+function spatialSample(light: SpatialLight, x: number, y: number) {
+  if (!light.enabled) return 0;
+  const dx = x - light.x, dy = y - light.y;
+  const ca = Math.cos(light.angle), sa = Math.sin(light.angle);
+  const xx = dx * ca + dy * sa, yy = -dx * sa + dy * ca;
+  const r = Math.max(0.025, light.radius);
+  if (light.kind === 'radial') {
+    const distance = Math.hypot(xx / r, yy / (r * Math.max(0.15, light.aspect)));
+    return light.intensity * Math.exp(-2.3 * distance * distance);
+  }
+  // Linear emitter: infinitely long soft band, with an editable width and rotation.
+  return light.intensity * Math.exp(-2.3 * (xx / r) ** 2);
+}
+function contourPoint(angle: number, shape: Shape): [number, number] {
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  let lo = 0, hi = 2.5;
+  for (let j = 0; j < 13; j++) {
+    const m = (lo + hi) / 2;
+    if (signedDistance(dx * m, dy * m, shape) < 0) lo = m;
+    else hi = m;
+  }
+  const r = (lo + hi) / 2;
+  return [dx * r, dy * r];
+}
+function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, lights: SpatialLight[], enabled: Record<EffectId, boolean>, t: number) {
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) return;
+  const size = canvas.width, image = ctx.createImageData(size, size), scale = size * 0.305;
+  // Precompute projected contour light for each angular sample once per frame.
+  const count = 1024, contourIllum = new Float32Array(count);
+  const contourR = new Float32Array(count), contourG = new Float32Array(count), contourB = new Float32Array(count);
+  const contour = contourArcTable(shape);
+  for (let k = 0; k < count; k++) {
+    const angle = k / count * Math.PI * 2 - Math.PI / 2;
+    const [cx, cy] = contourPoint(angle, shape);
+    let sum = 0, rr = 0, gg = 0, bb = 0;
+    for (const light of lights) {
+      const weight = spatialSample(light, cx, cy);
+      if (!weight) continue;
+      const rgb = hexRgb(light.color);
+      sum += weight; rr += rgb[0] * weight; gg += rgb[1] * weight; bb += rgb[2] * weight;
+    }
+    // The periodic master is a subtle shared gain, not a conic color source.
+    const gain = 0.65 + 0.35 * masterLight(contourPosition(angle, contour), u, t);
+    contourIllum[k] = sum * gain;
+    if (sum > 0) { contourR[k] = rr / sum; contourG[k] = gg / sum; contourB[k] = bb / sum; }
+  }
+  for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
+    const x = (px - size * 0.5) / scale, y = (py - size * 0.5) / scale;
+    const dist = signedDistance(x, y, shape) * scale;
+    const angle = Math.atan2(y, x);
+    const k = (((angle + Math.PI / 2) / (2 * Math.PI) + 1) % 1) * count;
+    const i = Math.floor(k), f = k - i, j = (i + 1) % count;
+    const field = contourIllum[i] * (1 - f) + contourIllum[j] * f;
+    const edgeRgb: [number, number, number, number] = [
+      contourR[i] * (1 - f) + contourR[j] * f,
+      contourG[i] * (1 - f) + contourG[j] * f,
+      contourB[i] * (1 - f) + contourB[j] * f, 1,
+    ];
+    const color = [4, 7, 17];
+    // Surface receives the spatial field at each actual surface pixel.
+    let local = 0, sr = 0, sg = 0, sb = 0;
+    if (dist <= 0 && enabled.surface) {
+      for (const light of lights) {
+        const w = spatialSample(light, x, y);
+        if (!w) continue;
+        const rgb = hexRgb(light.color);
+        local += w; sr += rgb[0] * w; sg += rgb[1] * w; sb += rgb[2] * w;
+      }
+      const palette = samplePalette(u.colorsSurface, clamp(local * u.surfaceResponse));
+      const nz = shape === 'sphere' ? Math.sqrt(Math.max(0, 1 - clamp(x*x + y*y))) : 1;
+      const diffuse = shape === 'sphere' ? 0.55 + 0.45 * nz : 1;
+      mixLight(color, palette, clamp(0.2 + local * u.surfaceResponse * diffuse));
+      if (local > 0) addLight(color, [sr/local, sg/local, sb/local, 1], local * u.surfaceResponse * 0.35);
+    }
+    const edgePalette = samplePalette(u.colorsEdge, clamp(field * u.edgeResponse));
+    const reflected: [number, number, number, number] = [
+      edgeRgb[0] * 0.72 + edgePalette[0] * 0.28,
+      edgeRgb[1] * 0.72 + edgePalette[1] * 0.28,
+      edgeRgb[2] * 0.72 + edgePalette[2] * 0.28, 1,
+    ];
+    const edgeStrength = field * u.edgeResponse;
+    if (dist > 0) {
+      const halo = Math.exp(-0.5 * (dist / Math.max(1, u.outerReach * (0.5 + u.softness))) ** 2);
+      const bounce = Math.exp(-0.5 * (dist / Math.max(1, u.backgroundReach * (0.6 + u.softness))) ** 2);
+      if (enabled.background) addLight(color, reflected, bounce * edgeStrength * u.emission * u.backgroundBounce * 0.42);
+      if (enabled.outer) addLight(color, reflected, halo * edgeStrength * u.emission * 0.85);
+    } else if (enabled.inner) {
+      const near = Math.exp(-0.5 * (dist / Math.max(1, u.innerReach * (0.45 + u.softness))) ** 2);
+      addLight(color, reflected, near * edgeStrength * u.emission * 0.5);
+    }
+    if (enabled.edge) {
+      const rim = Math.exp(-0.5 * (dist / Math.max(1, u.edgeWidth * (0.3 + u.softness * 0.45))) ** 2);
+      addLight(color, reflected, rim * edgeStrength);
+    }
+    const idx = (py * size + px) * 4;
+    for (let c = 0; c < 3; c++) image.data[idx + c] = Math.round(clamp(color[c] / 255) * 255);
+    image.data[idx + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+}
 function renderUnified(canvas: HTMLCanvasElement, shape: Shape, u: Unified, enabled: Record<EffectId, boolean>, t: number) {
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return;
@@ -254,6 +367,35 @@ function renderUnified(canvas: HTMLCanvasElement, shape: Shape, u: Unified, enab
   }
   ctx.putImageData(image, 0, 0);
 }
+function SpatialLightsControls({ lights, selected, onSelect, onChange }: {
+  lights: SpatialLight[]; selected: number; onSelect: (id: number) => void; onChange: (lights: SpatialLight[]) => void;
+}) {
+  const current = lights.find(l => l.id === selected) ?? lights[0];
+  const patch = (changes: Partial<SpatialLight>) => onChange(lights.map(l => l.id === current?.id ? { ...l, ...changes } : l));
+  const add = (kind: SpatialLight['kind']) => {
+    const id = Math.max(0, ...lights.map(l => l.id)) + 1;
+    onChange([...lights, { id, kind, enabled: true, x: 0, y: 0, angle: 0, radius: 0.7, aspect: 1, intensity: 1, color: '#a8ddff' }]);
+    onSelect(id);
+  };
+  return <div className="ml-section ml-light-editor"><h4>FUENTES ESPACIALES · ILUMINACIÓN COMPARTIDA</h4>
+    <p>Cada fuente ilumina superficie y contorno; el contorno propaga el reflejo a las cinco regiones. Coordenadas relativas al objeto.</p>
+    <div className="ml-light-actions"><button onClick={() => add('radial')}>+ Radial</button><button onClick={() => add('linear')}>+ Lineal</button></div>
+    <div className="ml-light-list">{lights.map(l => <div key={l.id} className={l.id === current?.id ? 'active' : ''}>
+      <input aria-label={`Activar luz ${l.id}`} type="checkbox" checked={l.enabled} onChange={e => onChange(lights.map(item => item.id === l.id ? {...item, enabled: e.target.checked} : item))}/>
+      <button onClick={() => onSelect(l.id)}>{l.kind === 'radial' ? '◉' : '▥'} Luz {l.id}</button>
+      <span style={{background:l.color}} className="ml-light-swatch"/>
+    </div>)}</div>
+    {current && <><div className="ml-light-actions"><button onClick={() => patch({kind: current.kind === 'radial' ? 'linear' : 'radial'})}>Tipo: {current.kind}</button><button disabled={lights.length <= 1} onClick={() => {onChange(lights.filter(l => l.id !== current.id));onSelect(lights.find(l => l.id !== current.id)?.id ?? 0);}}>Eliminar</button></div>
+      <label className="ml-light-color">Color <input type="color" value={current.color} onChange={e => patch({color:e.target.value})}/></label>
+      <NumberSlider label="Posición X" value={current.x} min={-2} max={2} step={0.01} onChange={x => patch({x})}/>
+      <NumberSlider label="Posición Y" value={current.y} min={-2} max={2} step={0.01} onChange={y => patch({y})}/>
+      <NumberSlider label={current.kind === 'radial' ? 'Radio' : 'Anchura de banda'} value={current.radius} min={0.05} max={2.5} step={0.01} onChange={radius => patch({radius})}/>
+      {current.kind === 'radial' && <NumberSlider label="Proporción elíptica" value={current.aspect} min={0.2} max={2.5} step={0.01} onChange={aspect => patch({aspect})}/>}
+      <NumberSlider label="Rotación (radianes)" value={current.angle} min={-3.14} max={3.14} step={0.01} onChange={angle => patch({angle})}/>
+      <NumberSlider label="Intensidad" value={current.intensity} min={0} max={2.5} step={0.01} onChange={intensity => patch({intensity})}/>
+    </>}
+  </div>;
+}
 function MasterCurve({ value }: { value: Unified }) {
   const path = Array.from({ length: 201 }, (_, i) => {
     const s = i / 200;
@@ -286,16 +428,20 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const [animate, setAnimate] = useState(true);
   const [unifiedMode, setUnifiedMode] = useState(true);
   const [unified, setUnified] = useState<Unified>(unifiedInitial);
+  const [spatialMode, setSpatialMode] = useState(true);
+  const [lights, setLights] = useState<SpatialLight[]>(defaultLights);
+  const [selectedLight, setSelectedLight] = useState(1);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const snapshot = useRef({ shape, settings, animate, unifiedMode, unified });
-  snapshot.current = { shape, settings, animate, unifiedMode, unified };
+  const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights });
+  snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights };
   useEffect(() => {
     let frame = 0, raf = 0;
     const tick = () => {
       const canvas = canvasRef.current;
       if (canvas) {
         const v = snapshot.current;
-        if (v.unifiedMode) renderUnified(canvas, v.shape, v.unified, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
+        if (v.unifiedMode && v.spatialMode) renderSpatial(canvas, v.shape, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
+        else if (v.unifiedMode) renderUnified(canvas, v.shape, v.unified, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
         else render(canvas, v.shape, v.settings, v.animate ? frame / 60 : 0);
       }
       frame++;
@@ -315,11 +461,11 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     update(selected, { colors });
   };
   const exportPng = () => { const canvas = canvasRef.current; if (!canvas) return; const a = document.createElement('a'); a.download = 'shadex-material.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
-  const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 2, shape, mode: unifiedMode ? 'unified' : 'legacy', unified, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
+  const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
   return <div className="ml-root">
-    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button><button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
+    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
-    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? 'UNIFIED LIGHT FIELD · SDF' : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
-    <aside className="ml-properties">{unifiedMode ? <><div className="ml-properties-title"><h3>Unified Light Field</h3><span>EXPERIMENTAL</span></div><UnifiedControls value={unified} onChange={patch => setUnified(prev => ({ ...prev, ...patch }))}/></> : <><div className="ml-properties-title"><h3>{effects.find(e => e.id === selected)?.name}</h3><span>PROPIEDADES</span></div><p>{effects.find(e => e.id === selected)?.subtitle}</p><div className="ml-section"><h4>{selected === 'edge' ? 'GRADIENTE DE CONTORNO · CÍCLICO' : 'GRADIENTE RGBA'}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${effect.colors.map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/>{selected === 'edge' && <p className="ml-contour-hint">Cinco stops RGBA distribuidos por longitud de arco. El quinto se sincroniza con el primero para cerrar el contorno sin costuras.</p>}<div className="ml-colors">{effect.colors.map((color, i) => <ColorEditor key={i} label={`Color ${i + 1} · ${i * 25}%${selected === 'edge' && i === 4 ? ' (cierre)' : ''}`} value={color} onChange={c => updateColor(i, c)}/>)}</div></div><div className="ml-section"><h4>{selected === 'surface' || selected === 'background' ? 'CAMPO RADIAL' : 'ANCHURA Y DENSIDAD'}</h4><NumberSlider label={selected === 'outer' ? 'Extensión gaussiana' : selected === 'surface' || selected === 'background' ? 'Radio' : 'Anchura'} value={effect.width} min={2} max={220} onChange={width => update(selected, { width })}/><NumberSlider label="Suavidad" value={effect.softness} min={0} max={1} step={0.01} onChange={softness => update(selected, { softness })}/>{(selected === 'surface' || selected === 'background') && <><NumberSlider label="Centro X" value={effect.centerX} min={-1.5} max={1.5} step={0.01} onChange={centerX => update(selected, { centerX })}/><NumberSlider label="Centro Y" value={effect.centerY} min={-1.5} max={1.5} step={0.01} onChange={centerY => update(selected, { centerY })}/></>}</div><div className="ml-section"><h4>MODULACIÓN SINUSOIDAL</h4><Curve effect={effect}/><NumberSlider label="Amplitud" value={effect.amplitude} min={0} max={1} step={0.01} onChange={amplitude => update(selected, { amplitude })}/><NumberSlider label="Frecuencia" value={effect.frequency} min={1} max={16} step={1} onChange={frequency => update(selected, { frequency })}/><NumberSlider label="Fase" value={effect.phase} min={0} max={6.28} step={0.01} onChange={phase => update(selected, { phase })}/></div><button className="ml-reset" onClick={() => update(selected, initial[selected])}>Restablecer efecto</button></>}</aside></div>
+    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? 'SPATIAL LIGHT FIELD · SDF' : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
+    <aside className="ml-properties">{unifiedMode ? <>{spatialMode && <SpatialLightsControls lights={lights} selected={selectedLight} onSelect={setSelectedLight} onChange={setLights}/>}<div className="ml-properties-title"><h3>Unified Light Field</h3><span>EXPERIMENTAL</span></div><UnifiedControls value={unified} onChange={patch => setUnified(prev => ({ ...prev, ...patch }))}/></> : <><div className="ml-properties-title"><h3>{effects.find(e => e.id === selected)?.name}</h3><span>PROPIEDADES</span></div><p>{effects.find(e => e.id === selected)?.subtitle}</p><div className="ml-section"><h4>{selected === 'edge' ? 'GRADIENTE DE CONTORNO · CÍCLICO' : 'GRADIENTE RGBA'}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${effect.colors.map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/>{selected === 'edge' && <p className="ml-contour-hint">Cinco stops RGBA distribuidos por longitud de arco. El quinto se sincroniza con el primero para cerrar el contorno sin costuras.</p>}<div className="ml-colors">{effect.colors.map((color, i) => <ColorEditor key={i} label={`Color ${i + 1} · ${i * 25}%${selected === 'edge' && i === 4 ? ' (cierre)' : ''}`} value={color} onChange={c => updateColor(i, c)}/>)}</div></div><div className="ml-section"><h4>{selected === 'surface' || selected === 'background' ? 'CAMPO RADIAL' : 'ANCHURA Y DENSIDAD'}</h4><NumberSlider label={selected === 'outer' ? 'Extensión gaussiana' : selected === 'surface' || selected === 'background' ? 'Radio' : 'Anchura'} value={effect.width} min={2} max={220} onChange={width => update(selected, { width })}/><NumberSlider label="Suavidad" value={effect.softness} min={0} max={1} step={0.01} onChange={softness => update(selected, { softness })}/>{(selected === 'surface' || selected === 'background') && <><NumberSlider label="Centro X" value={effect.centerX} min={-1.5} max={1.5} step={0.01} onChange={centerX => update(selected, { centerX })}/><NumberSlider label="Centro Y" value={effect.centerY} min={-1.5} max={1.5} step={0.01} onChange={centerY => update(selected, { centerY })}/></>}</div><div className="ml-section"><h4>MODULACIÓN SINUSOIDAL</h4><Curve effect={effect}/><NumberSlider label="Amplitud" value={effect.amplitude} min={0} max={1} step={0.01} onChange={amplitude => update(selected, { amplitude })}/><NumberSlider label="Frecuencia" value={effect.frequency} min={1} max={16} step={1} onChange={frequency => update(selected, { frequency })}/><NumberSlider label="Fase" value={effect.phase} min={0} max={6.28} step={0.01} onChange={phase => update(selected, { phase })}/></div><button className="ml-reset" onClick={() => update(selected, initial[selected])}>Restablecer efecto</button></>}</aside></div>
   </div>;
 }
