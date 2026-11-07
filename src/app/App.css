@@ -20,4 +20,4 @@
       transparent 40%
     ),
     #070810;
-}
+}.app{position:relative}.app__material-launch{position:fixed;z-index:20;right:45px;bottom:38px;border:1px solid #6cb5f4;background:#1c3764;color:#eff8ff;border-radius:14px;padding:13px 20px;box-shadow:0 10px 40px #0009;cursor:pointer;font:inherit}.app__material-launch:hover{background:#28518e}
