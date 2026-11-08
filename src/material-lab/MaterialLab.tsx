@@ -244,7 +244,30 @@ function contourPoint(angle: number, shape: Shape): [number, number] {
   const r = (lo + hi) / 2;
   return [dx * r, dy * r];
 }
-function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, lights: SpatialLight[], enabled: Record<EffectId, boolean>, t: number) {
+type TwistSettings = { enabled: boolean; amount: number; bands: number; rotation: number; silhouette: number; attached: boolean };
+const initialTwist: TwistSettings = { enabled: true, amount: 0.85, bands: 3, rotation: 0.45, silhouette: 0.12, attached: true };
+// Inverse mapping of a twisted 2.5D surface. The silhouette and surface share
+// the same angular displacement, while the surface UVs additionally swirl with
+// depth. This is not a true 3D mesh or physically correct normal mapping.
+function twistCoords(x: number, y: number, twist: TwistSettings, t: number) {
+  if (!twist.enabled) return { x, y, radius: 1, nx: x, ny: y };
+  const r = Math.hypot(x, y);
+  const a = Math.atan2(y, x);
+  const spin = twist.rotation + t * 0.19;
+  const envelope = Math.max(0, 1 - Math.min(1, r));
+  const bend = twist.amount * (0.25 + 0.75 * envelope * envelope);
+  const warpedAngle = a - bend * Math.sin(twist.bands * a + spin + 2.2 * r);
+  const radius = 1 + twist.silhouette * Math.sin(twist.bands * a + spin);
+  const theta = warpedAngle - twist.amount * envelope * 1.2;
+  return { x: r * Math.cos(theta), y: r * Math.sin(theta), radius, nx: Math.cos(a), ny: Math.sin(a) };
+}
+function twistDistance(x: number, y: number, shape: Shape, twist: TwistSettings, t: number) {
+  if (!twist.enabled || shape !== 'sphere') return signedDistance(x, y, shape);
+  const a = Math.atan2(y, x);
+  const radius = 1 + twist.silhouette * Math.sin(twist.bands * a + twist.rotation + t * 0.19);
+  return Math.hypot(x, y) - radius;
+}
+function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, lights: SpatialLight[], enabled: Record<EffectId, boolean>, t: number, twist: TwistSettings) {
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return;
   const size = canvas.width, image = ctx.createImageData(size, size), scale = size * 0.305;
@@ -254,10 +277,13 @@ function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, ligh
   const contour = contourArcTable(shape);
   for (let k = 0; k < count; k++) {
     const angle = k / count * Math.PI * 2 - Math.PI / 2;
-    const [cx, cy] = contourPoint(angle, shape);
+    const [baseX, baseY] = contourPoint(angle, shape);
+    const radius = twist.enabled && shape === 'sphere' ? 1 + twist.silhouette * Math.sin(twist.bands * angle + twist.rotation + t * 0.19) : 1;
+    const cx = baseX * radius, cy = baseY * radius;
+    const warped = twistCoords(cx, cy, twist, t);
     let sum = 0, rr = 0, gg = 0, bb = 0;
     for (const light of lights) {
-      const weight = spatialSample(light, cx, cy);
+      const weight = spatialSample(light, twist.attached ? warped.x : cx, twist.attached ? warped.y : cy);
       if (!weight) continue;
       const rgb = hexRgb(light.color);
       sum += weight; rr += rgb[0] * weight; gg += rgb[1] * weight; bb += rgb[2] * weight;
@@ -269,7 +295,8 @@ function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, ligh
   }
   for (let py = 0; py < size; py++) for (let px = 0; px < size; px++) {
     const x = (px - size * 0.5) / scale, y = (py - size * 0.5) / scale;
-    const dist = signedDistance(x, y, shape) * scale;
+    const dist = twistDistance(x, y, shape, twist, t) * scale;
+    const warped = twistCoords(x, y, twist, t);
     const angle = Math.atan2(y, x);
     const k = (((angle + Math.PI / 2) / (2 * Math.PI) + 1) % 1) * count;
     const i = Math.floor(k), f = k - i, j = (i + 1) % count;
@@ -284,15 +311,21 @@ function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, ligh
     let local = 0, sr = 0, sg = 0, sb = 0;
     if (dist <= 0 && enabled.surface) {
       for (const light of lights) {
-        const w = spatialSample(light, x, y);
+        const w = spatialSample(light, twist.attached ? warped.x : x, twist.attached ? warped.y : y);
         if (!w) continue;
         const rgb = hexRgb(light.color);
         local += w; sr += rgb[0] * w; sg += rgb[1] * w; sb += rgb[2] * w;
       }
       const palette = samplePalette(u.colorsSurface, clamp(local * u.surfaceResponse));
-      const nz = shape === 'sphere' ? Math.sqrt(Math.max(0, 1 - clamp(x*x + y*y))) : 1;
+      const nx = twist.enabled && shape === 'sphere' ? warped.x : x;
+      const ny = twist.enabled && shape === 'sphere' ? warped.y : y;
+      const nz = shape === 'sphere' ? Math.sqrt(Math.max(0, 1 - clamp(nx*nx + ny*ny))) : 1;
+      // Curved highlight bands approximate a twisted normal field in screen space.
+      const twistShade = twist.enabled && shape === 'sphere'
+        ? 0.78 + 0.22 * Math.cos(twist.bands * Math.atan2(ny, nx) + twist.rotation + t * 0.19 + twist.amount * nz * 3)
+        : 1;
       const diffuse = shape === 'sphere' ? 0.55 + 0.45 * nz : 1;
-      mixLight(color, palette, clamp(0.2 + local * u.surfaceResponse * diffuse));
+      mixLight(color, palette, clamp(0.2 + local * u.surfaceResponse * diffuse * twistShade));
       if (local > 0) addLight(color, [sr/local, sg/local, sb/local, 1], local * u.surfaceResponse * 0.35);
     }
     const edgePalette = samplePalette(u.colorsEdge, clamp(field * u.edgeResponse));
@@ -320,6 +353,190 @@ function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, ligh
     image.data[idx + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
+}
+// Geometry is displaced BEFORE lighting. This is a projected height-field mesh,
+// not a texture-coordinate warp. No 3D light transport is calculated.
+type SurfaceMode = 'twist-sheet' | 'bessel' | 'waves';
+type SurfaceSettings = {
+  enabled: boolean; mode: SurfaceMode; amplitude: number; folds: number;
+  twist: number; tilt: number; spin: number; wireframe: boolean; animate: boolean;
+};
+const initialSurface: SurfaceSettings = {
+  enabled: false, mode: 'bessel', amplitude: 0.7, folds: 3,
+  twist: 1.1, tilt: 0.7, spin: 0.35, wireframe: false, animate: true,
+};
+function surfaceHeight(x: number, y: number, v: SurfaceSettings, t: number): number {
+  const r = Math.hypot(x, y), a = Math.atan2(y, x);
+  const phase = v.animate ? t * 0.65 : 0;
+  if (v.mode === 'twist-sheet') {
+    // Sheet folded around a moving axis; envelope tapers at the boundary.
+    const theta = a + v.twist * (1 - r) + phase;
+    return v.amplitude * Math.sin(v.folds * theta) * Math.pow(Math.max(0, 1-r*r), 0.55);
+  }
+  if (v.mode === 'waves') {
+    return v.amplitude * (0.55 * Math.sin(v.folds * 2.3 * x + v.twist * y + phase)
+      + 0.45 * Math.sin(v.folds * 2.0 * y - v.twist * x - phase * 0.75)) * (1 - 0.25*r*r);
+  }
+  // Bessel-like clamped circular membrane: radial nodes plus azimuthal lobes.
+  // The inexpensive polynomial radial approximation is NOT an exact Bessel J_m.
+  const m = Math.max(0, Math.round(v.folds));
+  const radial = Math.pow(Math.max(0, 1-r*r), 1.1) * Math.cos(Math.PI * v.twist * r);
+  return v.amplitude * radial * Math.cos(m * a + phase);
+}
+type MeshVertex = { x:number; y:number; sx:number; sy:number; z:number; nx:number; ny:number; nz:number };
+// Rasterize the projected sheet into a per-pixel geometry buffer, then apply
+// the SAME spatial-light/material response as the undeformed 2D object.
+// This is a screen-space 2.5D approximation, not physical 3D illumination.
+function renderSurface(canvas: HTMLCanvasElement, v: SurfaceSettings, u: Unified, lights: SpatialLight[], enabled: Record<EffectId,boolean>, t: number) {
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) return;
+  const size = canvas.width, total = size * size, center = size * .5, scale = size * .305;
+  const rings = 32, sectors = 96, ca = Math.cos(v.spin), sa = Math.sin(v.spin);
+  const tiltCos = Math.cos(v.tilt), tiltSin = Math.sin(v.tilt);
+  const verts: MeshVertex[][] = [];
+  function project(x:number,y:number,z:number):[number,number] {
+    const rx=x*ca-y*sa, ry=x*sa+y*ca;
+    return [center+rx*scale, center+(ry*tiltCos-z*tiltSin)*scale];
+  }
+  for(let j=0;j<=rings;j++) {
+    const ring:MeshVertex[]=[];
+    const radius=j/rings;
+    for(let k=0;k<=sectors;k++) {
+      const a=k/sectors*Math.PI*2, x=radius*Math.cos(a), y=radius*Math.sin(a);
+      const z=surfaceHeight(x,y,v,t), h=.008;
+      const dzdx=(surfaceHeight(x+h,y,v,t)-surfaceHeight(x-h,y,v,t))/(2*h);
+      const dzdy=(surfaceHeight(x,y+h,v,t)-surfaceHeight(x,y-h,v,t))/(2*h);
+      const inv=1/Math.hypot(dzdx,dzdy,1);
+      const [sx,sy]=project(x,y,z);
+      ring.push({x,y,z,sx,sy,nx:-dzdx*inv,ny:-dzdy*inv,nz:inv});
+    }
+    verts.push(ring);
+  }
+  const uvx=new Float32Array(total), uvy=new Float32Array(total);
+  const normalX=new Float32Array(total),normalY=new Float32Array(total),normalZ=new Float32Array(total);
+  const depth=new Float32Array(total).fill(-Infinity);
+  const covered=new Uint8Array(total);
+  const image=ctx.createImageData(size,size);
+  // Pixel barycentric interpolation removes the old per-triangle flat colors.
+  function triangle(a:MeshVertex,b:MeshVertex,c:MeshVertex) {
+    const den=(b.sy-c.sy)*(a.sx-c.sx)+(c.sx-b.sx)*(a.sy-c.sy);
+    if(Math.abs(den)<1e-8)return;
+    const minX=Math.max(0,Math.floor(Math.min(a.sx,b.sx,c.sx)));
+    const maxX=Math.min(size-1,Math.ceil(Math.max(a.sx,b.sx,c.sx)));
+    const minY=Math.max(0,Math.floor(Math.min(a.sy,b.sy,c.sy)));
+    const maxY=Math.min(size-1,Math.ceil(Math.max(a.sy,b.sy,c.sy)));
+    // Camera depth: projected rotated Y and height Z, not just world Z.
+    const da=(a.x*sa+a.y*ca)*tiltSin+a.z*tiltCos;
+    const db=(b.x*sa+b.y*ca)*tiltSin+b.z*tiltCos;
+    const dc=(c.x*sa+c.y*ca)*tiltSin+c.z*tiltCos;
+    for(let py=minY;py<=maxY;py++)for(let px=minX;px<=maxX;px++) {
+      const x=px+.5,y=py+.5;
+      const w0=((b.sy-c.sy)*(x-c.sx)+(c.sx-b.sx)*(y-c.sy))/den;
+      const w1=((c.sy-a.sy)*(x-c.sx)+(a.sx-c.sx)*(y-c.sy))/den;
+      const w2=1-w0-w1;
+      if(w0<-.00001||w1<-.00001||w2<-.00001)continue;
+      const i=py*size+px,d=w0*da+w1*db+w2*dc;
+      if(d<=depth[i])continue;
+      depth[i]=d;covered[i]=1;
+      uvx[i]=w0*a.x+w1*b.x+w2*c.x;
+      uvy[i]=w0*a.y+w1*b.y+w2*c.y;
+      normalX[i]=w0*a.nx+w1*b.nx+w2*c.nx;
+      normalY[i]=w0*a.ny+w1*b.ny+w2*c.ny;
+      normalZ[i]=w0*a.nz+w1*b.nz+w2*c.nz;
+    }
+  }
+  for(let j=0;j<rings;j++)for(let k=0;k<sectors;k++) {
+    const a=verts[j][k],b=verts[j+1][k],c=verts[j+1][k+1],d=verts[j][k+1];
+    triangle(a,b,c);triangle(a,c,d);
+  }
+  // Find the visible silhouette, including folds that project outside the
+  // original circular rim. Propagate the nearest silhouette seed to both sides.
+  const nearest=new Int32Array(total).fill(-1);
+  const distance=new Float32Array(total).fill(1e8);
+  for(let y=1;y<size-1;y++)for(let x=1;x<size-1;x++) {
+    const i=y*size+x,inside=covered[i];
+    if(covered[i-1]!==inside||covered[i+1]!==inside||covered[i-size]!==inside||covered[i+size]!==inside){
+      nearest[i]=inside?i:(covered[i-1]?i-1:covered[i+1]?i+1:covered[i-size]?i-size:i+size);
+      distance[i]=0;
+    }
+  }
+  // Chamfer nearest-boundary propagation. This is deliberately screen-space:
+  // the edge glows follow the *visible projected silhouette* of the sheet.
+  function relax(i:number,j:number,cost:number){
+    const d=distance[j]+cost;
+    if(d<distance[i]){distance[i]=d;nearest[i]=nearest[j];}
+  }
+  for(let y=1;y<size-1;y++)for(let x=1;x<size-1;x++){
+    const i=y*size+x;relax(i,i-1,1);relax(i,i-size,1);relax(i,i-size-1,1.4142);relax(i,i-size+1,1.4142);
+  }
+  for(let y=size-2;y>=1;y--)for(let x=size-2;x>=1;x--){
+    const i=y*size+x;relax(i,i+1,1);relax(i,i+size,1);relax(i,i+size+1,1.4142);relax(i,i+size-1,1.4142);
+  }
+  const activeLights=lights.filter(l=>l.enabled).map(l=>({light:l,rgb:hexRgb(l.color)}));
+  // Cache light evaluation on boundary seeds, shared by edge, inner glow,
+  // outer glow and background. All derive from the same source lights.
+  const field=new Float32Array(total), red=new Float32Array(total),green=new Float32Array(total),blue=new Float32Array(total);
+  for(let i=0;i<total;i++)if(distance[i]===0&&covered[i]){
+    let sum=0,rr=0,gg=0,bb=0;
+    for(const {light,rgb} of activeLights){
+      const w=spatialSample(light,uvx[i],uvy[i]);sum+=w;rr+=w*rgb[0];gg+=w*rgb[1];bb+=w*rgb[2];
+    }
+    const a=Math.atan2(uvy[i],uvx[i]);
+    const gain=.65+.35*masterLight(((a+Math.PI/2)/(Math.PI*2)+1)%1,u,t);
+    field[i]=sum*gain;
+    if(sum>1e-6){red[i]=rr/sum;green[i]=gg/sum;blue[i]=bb/sum;}
+  }
+  for(let py=0;py<size;py++)for(let px=0;px<size;px++){
+    const i=py*size+px, inside=covered[i]===1, dist=distance[i]*(inside?-1:1);
+    const color=[4,7,17];
+    if(inside&&enabled.surface){
+      let power=0,rr=0,gg=0,bb=0;
+      for(const {light,rgb} of activeLights){
+        const w=spatialSample(light,uvx[i],uvy[i]);power+=w;rr+=rgb[0]*w;gg+=rgb[1]*w;bb+=rgb[2]*w;
+      }
+      // Normal-based modulation is subtle: it shapes the reflected light but
+      // never replaces the original continuous 2D spatial gradients.
+      const shade=clamp(.78+.16*normalZ[i]-.08*normalX[i]-.07*normalY[i],.5,1.08);
+      const pal=samplePalette(u.colorsSurface,clamp(power*u.surfaceResponse));
+      mixLight(color,pal,clamp((.2+power*u.surfaceResponse)*shade));
+      if(power>1e-6)addLight(color,[rr/power,gg/power,bb/power,1],power*u.surfaceResponse*.35*shade);
+    }
+    const seed=nearest[i];
+    if(seed>=0){
+      const strength=field[seed]*u.edgeResponse;
+      const pal=samplePalette(u.colorsEdge,clamp(strength));
+      const reflected:[number,number,number,number]=[
+        red[seed]*.72+pal[0]*.28,green[seed]*.72+pal[1]*.28,blue[seed]*.72+pal[2]*.28,1
+      ];
+      if(!inside){
+        const halo=Math.exp(-.5*(dist/Math.max(1,u.outerReach*(.5+u.softness)))**2);
+        const bounce=Math.exp(-.5*(dist/Math.max(1,u.backgroundReach*(.6+u.softness)))**2);
+        if(enabled.background)addLight(color,reflected,bounce*strength*u.emission*u.backgroundBounce*.42);
+        if(enabled.outer)addLight(color,reflected,halo*strength*u.emission*.85);
+      }else if(enabled.inner){
+        const near=Math.exp(-.5*(dist/Math.max(1,u.innerReach*(.45+u.softness)))**2);
+        addLight(color,reflected,near*strength*u.emission*.5);
+      }
+      if(enabled.edge){
+        const rim=Math.exp(-.5*(dist/Math.max(1,u.edgeWidth*(.3+u.softness*.45)))**2);
+        addLight(color,reflected,rim*strength);
+      }
+    }
+    const o=i*4;
+    image.data[o]=Math.round(clamp(color[0]/255)*255);
+    image.data[o+1]=Math.round(clamp(color[1]/255)*255);
+    image.data[o+2]=Math.round(clamp(color[2]/255)*255);
+    image.data[o+3]=255;
+  }
+  ctx.putImageData(image,0,0);
+  if(v.wireframe){
+    ctx.save();ctx.strokeStyle='rgba(190,232,255,.19)';ctx.lineWidth=.45;
+    for(let j=0;j<rings;j+=2)for(let k=0;k<sectors;k+=3){
+      const a=verts[j][k],b=verts[j+1][k],c=verts[j+1][k+1];
+      ctx.beginPath();ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.lineTo(c.sx,c.sy);ctx.stroke();
+    }
+    ctx.restore();
+  }
 }
 function renderUnified(canvas: HTMLCanvasElement, shape: Shape, u: Unified, enabled: Record<EffectId, boolean>, t: number) {
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -431,16 +648,19 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const [spatialMode, setSpatialMode] = useState(true);
   const [lights, setLights] = useState<SpatialLight[]>(defaultLights);
   const [selectedLight, setSelectedLight] = useState(1);
+  const [twist, setTwist] = useState<TwistSettings>(initialTwist);
+  const [surface, setSurface] = useState<SurfaceSettings>(initialSurface);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights });
-  snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights };
+  const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface });
+  snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface };
   useEffect(() => {
     let frame = 0, raf = 0;
     const tick = () => {
       const canvas = canvasRef.current;
       if (canvas) {
         const v = snapshot.current;
-        if (v.unifiedMode && v.spatialMode) renderSpatial(canvas, v.shape, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
+        if (v.unifiedMode && v.spatialMode && v.surface.enabled) renderSurface(canvas, v.surface, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
+        else if (v.unifiedMode && v.spatialMode) renderSpatial(canvas, v.shape, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0, v.twist);
         else if (v.unifiedMode) renderUnified(canvas, v.shape, v.unified, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
         else render(canvas, v.shape, v.settings, v.animate ? frame / 60 : 0);
       }
@@ -461,11 +681,23 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     update(selected, { colors });
   };
   const exportPng = () => { const canvas = canvasRef.current; if (!canvas) return; const a = document.createElement('a'); a.download = 'shadex-material.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
-  const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
+  const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, twist, surface, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
   return <div className="ml-root">
     <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
-    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? 'SPATIAL LIGHT FIELD · SDF' : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
-    <aside className="ml-properties">{unifiedMode ? <>{spatialMode && <SpatialLightsControls lights={lights} selected={selectedLight} onSelect={setSelectedLight} onChange={setLights}/>}<div className="ml-properties-title"><h3>Unified Light Field</h3><span>EXPERIMENTAL</span></div><UnifiedControls value={unified} onChange={patch => setUnified(prev => ({ ...prev, ...patch }))}/></> : <><div className="ml-properties-title"><h3>{effects.find(e => e.id === selected)?.name}</h3><span>PROPIEDADES</span></div><p>{effects.find(e => e.id === selected)?.subtitle}</p><div className="ml-section"><h4>{selected === 'edge' ? 'GRADIENTE DE CONTORNO · CÍCLICO' : 'GRADIENTE RGBA'}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${effect.colors.map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/>{selected === 'edge' && <p className="ml-contour-hint">Cinco stops RGBA distribuidos por longitud de arco. El quinto se sincroniza con el primero para cerrar el contorno sin costuras.</p>}<div className="ml-colors">{effect.colors.map((color, i) => <ColorEditor key={i} label={`Color ${i + 1} · ${i * 25}%${selected === 'edge' && i === 4 ? ' (cierre)' : ''}`} value={color} onChange={c => updateColor(i, c)}/>)}</div></div><div className="ml-section"><h4>{selected === 'surface' || selected === 'background' ? 'CAMPO RADIAL' : 'ANCHURA Y DENSIDAD'}</h4><NumberSlider label={selected === 'outer' ? 'Extensión gaussiana' : selected === 'surface' || selected === 'background' ? 'Radio' : 'Anchura'} value={effect.width} min={2} max={220} onChange={width => update(selected, { width })}/><NumberSlider label="Suavidad" value={effect.softness} min={0} max={1} step={0.01} onChange={softness => update(selected, { softness })}/>{(selected === 'surface' || selected === 'background') && <><NumberSlider label="Centro X" value={effect.centerX} min={-1.5} max={1.5} step={0.01} onChange={centerX => update(selected, { centerX })}/><NumberSlider label="Centro Y" value={effect.centerY} min={-1.5} max={1.5} step={0.01} onChange={centerY => update(selected, { centerY })}/></>}</div><div className="ml-section"><h4>MODULACIÓN SINUSOIDAL</h4><Curve effect={effect}/><NumberSlider label="Amplitud" value={effect.amplitude} min={0} max={1} step={0.01} onChange={amplitude => update(selected, { amplitude })}/><NumberSlider label="Frecuencia" value={effect.frequency} min={1} max={16} step={1} onChange={frequency => update(selected, { frequency })}/><NumberSlider label="Fase" value={effect.phase} min={0} max={6.28} step={0.01} onChange={phase => update(selected, { phase })}/></div><button className="ml-reset" onClick={() => update(selected, initial[selected])}>Restablecer efecto</button></>}</aside></div>
+    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? 'PARAMETRIC SURFACE · MESH 2.5D' : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
+    <aside className="ml-properties">{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
+      <label><input type="checkbox" checked={surface.enabled} onChange={e=>setSurface(v=>({...v,enabled:e.target.checked}))}/> Activar geometría de lámina</label>
+      {surface.enabled && <>
+      <label>Deformador <select value={surface.mode} onChange={e=>setSurface(v=>({...v,mode:e.target.value as SurfaceMode}))}><option value="twist-sheet">Twist Sheet</option><option value="bessel">Membrana Bessel (aprox.)</option><option value="waves">Wave Surface</option></select></label>
+      <NumberSlider label="Altura / amplitud" value={surface.amplitude} min={0} max={1.4} step={0.02} onChange={amplitude=>setSurface(v=>({...v,amplitude}))}/>
+      <NumberSlider label="Lóbulos / ondas" value={surface.folds} min={0} max={8} step={1} onChange={folds=>setSurface(v=>({...v,folds}))}/>
+      <NumberSlider label="Torsión / nodos radiales" value={surface.twist} min={0} max={4} step={0.05} onChange={twist=>setSurface(v=>({...v,twist}))}/>
+      <NumberSlider label="Inclinación cámara" value={surface.tilt} min={0.15} max={1.4} step={0.02} onChange={tilt=>setSurface(v=>({...v,tilt}))}/>
+      <NumberSlider label="Giro de cámara" value={surface.spin} min={-3.14} max={3.14} step={0.02} onChange={spin=>setSurface(v=>({...v,spin}))}/>
+      <label><input type="checkbox" checked={surface.wireframe} onChange={e=>setSurface(v=>({...v,wireframe:e.target.checked}))}/> Mostrar malla</label>
+      <label><input type="checkbox" checked={surface.animate} onChange={e=>setSurface(v=>({...v,animate:e.target.checked}))}/> Animar deformación</label>
+      <p>Disco con altura geométrica proyectada, iluminado con las luces espaciales 2D existentes. La membrana es una aproximación visual, no una solución Bessel exacta.</p>
+      </>}</div>}{spatialMode && <div className="ml-section"><h4>TWISTED SPHERE · 2.5D</h4><label><input type="checkbox" checked={twist.enabled} onChange={e => setTwist(v => ({...v, enabled:e.target.checked}))}/> Activar torsión</label><NumberSlider label="Torsión" value={twist.amount} min={0} max={2.5} step={0.05} onChange={amount => setTwist(v => ({...v, amount}))}/><NumberSlider label="Bandas" value={twist.bands} min={1} max={8} step={1} onChange={bands => setTwist(v => ({...v, bands}))}/><NumberSlider label="Rotación / fase" value={twist.rotation} min={-3.14} max={3.14} step={0.05} onChange={rotation => setTwist(v => ({...v, rotation}))}/><NumberSlider label="Deformación silueta" value={twist.silhouette} min={0} max={0.3} step={0.01} onChange={silhouette => setTwist(v => ({...v, silhouette}))}/><label><input type="checkbox" checked={twist.attached} onChange={e => setTwist(v => ({...v, attached:e.target.checked}))}/> Luces adheridas a superficie (desmarcar = luces fijas)</label><p>Prueba 2.5D: deforma coordenadas de superficie y silueta sin malla 3D. Selecciona Esfera 3D*.</p></div>}{spatialMode && <SpatialLightsControls lights={lights} selected={selectedLight} onSelect={setSelectedLight} onChange={setLights}/>}<div className="ml-properties-title"><h3>Unified Light Field</h3><span>EXPERIMENTAL</span></div><UnifiedControls value={unified} onChange={patch => setUnified(prev => ({ ...prev, ...patch }))}/></> : <><div className="ml-properties-title"><h3>{effects.find(e => e.id === selected)?.name}</h3><span>PROPIEDADES</span></div><p>{effects.find(e => e.id === selected)?.subtitle}</p><div className="ml-section"><h4>{selected === 'edge' ? 'GRADIENTE DE CONTORNO · CÍCLICO' : 'GRADIENTE RGBA'}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${effect.colors.map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/>{selected === 'edge' && <p className="ml-contour-hint">Cinco stops RGBA distribuidos por longitud de arco. El quinto se sincroniza con el primero para cerrar el contorno sin costuras.</p>}<div className="ml-colors">{effect.colors.map((color, i) => <ColorEditor key={i} label={`Color ${i + 1} · ${i * 25}%${selected === 'edge' && i === 4 ? ' (cierre)' : ''}`} value={color} onChange={c => updateColor(i, c)}/>)}</div></div><div className="ml-section"><h4>{selected === 'surface' || selected === 'background' ? 'CAMPO RADIAL' : 'ANCHURA Y DENSIDAD'}</h4><NumberSlider label={selected === 'outer' ? 'Extensión gaussiana' : selected === 'surface' || selected === 'background' ? 'Radio' : 'Anchura'} value={effect.width} min={2} max={220} onChange={width => update(selected, { width })}/><NumberSlider label="Suavidad" value={effect.softness} min={0} max={1} step={0.01} onChange={softness => update(selected, { softness })}/>{(selected === 'surface' || selected === 'background') && <><NumberSlider label="Centro X" value={effect.centerX} min={-1.5} max={1.5} step={0.01} onChange={centerX => update(selected, { centerX })}/><NumberSlider label="Centro Y" value={effect.centerY} min={-1.5} max={1.5} step={0.01} onChange={centerY => update(selected, { centerY })}/></>}</div><div className="ml-section"><h4>MODULACIÓN SINUSOIDAL</h4><Curve effect={effect}/><NumberSlider label="Amplitud" value={effect.amplitude} min={0} max={1} step={0.01} onChange={amplitude => update(selected, { amplitude })}/><NumberSlider label="Frecuencia" value={effect.frequency} min={1} max={16} step={1} onChange={frequency => update(selected, { frequency })}/><NumberSlider label="Fase" value={effect.phase} min={0} max={6.28} step={0.01} onChange={phase => update(selected, { phase })}/></div><button className="ml-reset" onClick={() => update(selected, initial[selected])}>Restablecer efecto</button></>}</aside></div>
   </div>;
 }
