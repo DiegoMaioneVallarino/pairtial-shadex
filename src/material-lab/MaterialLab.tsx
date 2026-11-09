@@ -1,6 +1,8 @@
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import './MaterialLab.css';
+import { NativeGLSLRenderer, makeShadertoyGLSL } from './glslNative';
+import type { GLSLAnimations } from './glslNative';
 
 type Shape = 'circle' | 'sphere' | 'rounded' | 'diamond';
 type EffectId = 'edge' | 'inner' | 'outer' | 'surface' | 'background';
@@ -670,7 +672,7 @@ function MasterCurve({ value }: { value: Unified }) {
   return <svg className="ml-curve" viewBox="0 0 320 108" preserveAspectRatio="none" aria-label="Curva maestra periódica"><path d="M0 96 H320" stroke="#3b4761" strokeDasharray="4 4"/><path d={path} stroke="#69c6ff" strokeWidth="2.5" fill="none"/><circle cx="0" cy={96-masterLight(0,value,0)*80} r="3" fill="#ffffff"/><circle cx="320" cy={96-masterLight(1,value,0)*80} r="3" fill="#ffffff"/></svg>;
 }
 function UnifiedControls({ value, onChange }: { value: Unified; onChange: (patch: Partial<Unified>) => void }) {
-  const slider = (label: string, key: keyof Unified, min: number, max: number, step = 0.01) => <NumberSlider label={label} value={value[key] as number} min={min} max={max} step={step} onChange={v => onChange({ [key]: v })}/>;
+  const slider = (label: string, key: keyof Unified, min: number, max: number, step = 0.01) => <NumberSlider label={label} automationId={`unified:${key}`} value={value[key] as number} min={min} max={max} step={step} onChange={v => onChange({ [key]: v })}/>;
   const palette = (key: 'colorsSurface' | 'colorsEdge', title: string) => <div className="ml-section"><h4>{title}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${value[key].map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/><div className="ml-colors">{value[key].map((c,i) => <ColorEditor key={i} label={`Color ${i+1} · ${i*25}%`} value={c} onChange={next => onChange({ [key]: value[key].map((old,j) => j === i ? next : old) })}/>)}</div></div>;
   return <><p>Una sola función periódica alimenta las cinco regiones. Dos paletas describen la respuesta de la superficie y el borde.</p><div className="ml-section"><h4>CAMPO MAESTRO · UNA SOLA CURVA</h4><MasterCurve value={value}/>{slider('Ciclos completos', 'cycles', 1, 12, 1)}{slider('Amplitud', 'amplitude', 0, 1)}{slider('Fase', 'phase', 0, 6.28)}{slider('Velocidad', 'animateSpeed', 0, 2)}{slider('Luz ambiente', 'ambient', 0, 0.5)}</div>{palette('colorsSurface','REFLECTANCIA · SUPERFICIE')}{palette('colorsEdge','REFLECTANCIA · BORDE')}<div className="ml-section"><h4>RESPUESTA MATERIAL</h4>{slider('Reflectancia superficial', 'surfaceResponse', 0, 2)}{slider('Reflectancia de borde', 'edgeResponse', 0, 2)}{slider('Emisión / dispersión', 'emission', 0, 2)}{slider('Rebote al fondo', 'backgroundBounce', 0, 2)}</div><div className="ml-section"><h4>PROPAGACIÓN DESDE EL CONTORNO</h4>{slider('Grosor de borde', 'edgeWidth', 2, 35, 1)}{slider('Alcance interior', 'innerReach', 1, 110, 1)}{slider('Alcance exterior', 'outerReach', 1, 130, 1)}{slider('Alcance del fondo', 'backgroundReach', 1, 200, 1)}{slider('Suavidad', 'softness', 0, 1)}</div><button className="ml-reset" onClick={() => onChange(unifiedInitial)}>Restablecer campo</button></>;
 }
@@ -692,7 +694,7 @@ function NumberSlider({ label, value, min, max, step = 1, onChange, automationId
   const latest = useRef<SliderDriver>({ value, min, max, step, onChange });
   latest.current = { value, min, max, step, onChange };
   useEffect(() => {
-    if (!automation || automationId) return;
+    if (!automation || automationId?.startsWith('light:')) return;
     // Keep a stable driver object; its values and callback always stay current.
     const driver: SliderDriver = {
       get value() { return latest.current.value; },
@@ -722,6 +724,10 @@ function ColorEditor({ label, value, onChange }: { label: string; value: RGBA; o
 }
 export function MaterialLab({ onBack }: { onBack: () => void }) {
   const [shape, setShape] = useState<Shape>('sphere');
+  const [nativeGPU, setNativeGPU] = useState(false);
+  const [gpuError, setGpuError] = useState('');
+  const gpuCanvasRef = useRef<HTMLCanvasElement>(null);
+  const gpuRenderer = useRef<NativeGLSLRenderer | null>(null);
   const [settings, setSettings] = useState<Settings>(initial);
   const [selected, setSelected] = useState<EffectId>('edge');
   const [animate, setAnimate] = useState(true);
@@ -783,6 +789,20 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
       }
     }
   }, [lights]);
+  const gpuSupported = unifiedMode && spatialMode && shape === 'sphere' && !surface.enabled && !twist.enabled;
+  const gpuActive = nativeGPU && gpuSupported;
+  const isGpuParameter = (id:string) => id.startsWith('light:') || id.startsWith('unified:');
+  const animationsForShader = ():GLSLAnimations => {
+    const out:GLSLAnimations = {};
+    for (const [id, driver] of drivers.current) {
+      if (!autoSliders[id] || !isGpuParameter(id)) continue;
+      const m=motion.current.get(id) ?? {position:driver.value,direction:1 as const};
+      out[id]={min:driver.min,max:driver.max,start:m.position,direction:m.direction,speed:autoSpeed};
+    }
+    return out;
+  };
+  const [gpuAnimationRevision, setGpuAnimationRevision] = useState(0);
+  const animationClock = useRef({elapsed:0,last:0});
   const automationContext: SliderAutomation = {
     active: autoSliders, toggle: toggleSlider.current,
     register: registerSlider.current, unregister: unregisterSlider.current,
@@ -796,7 +816,7 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
       const { active, speed, playing } = automationRunning.current;
       if (!playing || exportBusy.current) return;
       for (const [id, driver] of drivers.current) {
-        if (!active[id] || driver.max <= driver.min) continue;
+        if (!active[id] || driver.max <= driver.min || (gpuActiveRef.current && isGpuParameter(id))) continue;
         const range = driver.max - driver.min;
         const state = motion.current.get(id) ?? { position: driver.value, direction: 1 as const };
         let position = state.position + state.direction * range * speed * dt;
@@ -814,6 +834,23 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     return () => window.clearInterval(timer);
   }, []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gpuActiveRef=useRef(false);
+  gpuActiveRef.current=gpuActive;
+  useEffect(()=>{ animationClock.current.elapsed=0; setGpuAnimationRevision(v=>v+1); },[autoSliders,autoSpeed]);
+  const glslSource = useMemo(()=>makeShadertoyGLSL(unified, lights, { edge:settings.edge.enabled, inner:settings.inner.enabled, outer:settings.outer.enabled, surface:settings.surface.enabled, background:settings.background.enabled },animationsForShader()),[unified,lights,settings,autoSliders,autoSpeed,gpuAnimationRevision]);
+  useEffect(() => {
+    gpuRenderer.current?.dispose();gpuRenderer.current=null;
+    if (!nativeGPU || !gpuSupported || !gpuCanvasRef.current) return;
+    try {gpuRenderer.current=new NativeGLSLRenderer(gpuCanvasRef.current,glslSource);setGpuError('');}
+    catch(err){setGpuError(err instanceof Error?err.message:String(err));}
+    return ()=>{gpuRenderer.current?.dispose();gpuRenderer.current=null;};
+  },[nativeGPU,gpuSupported,glslSource]);
+  const exportGLSL=()=>{
+    if (!gpuSupported) setGpuError('Se exportará la esfera GLSL compatible; las superficies y torsión Canvas no están incluidas.');
+    const blob=new Blob([glslSource],{type:'text/plain'});const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='shadex-spatial-sphere-shadertoy.glsl';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+
   const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal });
   snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal };
   // One render path for preview and video, so exports include the exact same layers.
@@ -835,29 +872,29 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     else if (v.unifiedMode) renderUnified(canvas,v.shape,v.unified,enabled,time);
     else render(canvas,v.shape,v.settings,time);
   }
+  const nativeGpuState = useRef(false);
+  nativeGpuState.current = nativeGPU && gpuSupported && !!gpuRenderer.current;
   useEffect(() => {
-    let frame = 0, timer = 0;
+    let raf = 0;
     let sampleStart = performance.now(), sampleFrames = 0, renderSum = 0;
-    const tick = () => {
+    let last = performance.now();
+    const tick = (now:number) => {
+      const dt=Math.min(0.1,(now-last)/1000);last=now;
       if (!exportBusy.current) {
-        const renderStart = performance.now();
-        const canvas = canvasRef.current;
-        if (canvas) drawScene(canvas, snapshot.current, snapshot.current.animate ? frame / 60 : 0);
-        frame++;
+        if (snapshot.current.animate) animationClock.current.elapsed+=dt;
+        const renderStart=performance.now();
+        const canvas=canvasRef.current;
+        if (nativeGpuState.current && gpuRenderer.current) gpuRenderer.current.draw(animationClock.current.elapsed);
+        else if (canvas) drawScene(canvas,snapshot.current,animationClock.current.elapsed);
         sampleFrames++;
-        renderSum += performance.now() - renderStart;
-        const elapsed = performance.now() - sampleStart;
-        if (elapsed >= 1000) {
-          setFpsStats({ fps: sampleFrames * 1000 / elapsed, renderMs: renderSum / sampleFrames });
-          sampleFrames = 0; renderSum = 0; sampleStart = performance.now();
-        }
-      } else {
-        sampleStart = performance.now(); sampleFrames = 0; renderSum = 0;
-      }
-      timer = window.setTimeout(tick, snapshot.current.animate ? 50 : 150);
+        renderSum+=performance.now()-renderStart;
+        const elapsed=performance.now()-sampleStart;
+        if(elapsed>=1000){setFpsStats({fps:sampleFrames*1000/elapsed,renderMs:renderSum/Math.max(1,sampleFrames)});sampleFrames=0;renderSum=0;sampleStart=now;}
+      } else {sampleStart=now;sampleFrames=0;renderSum=0;}
+      raf=requestAnimationFrame(tick);
     };
-    tick();
-    return () => window.clearTimeout(timer);
+    raf=requestAnimationFrame(tick);
+    return ()=>cancelAnimationFrame(raf);
   }, []);
   // Offline frame generation followed by real-time encoding. MediaRecorder timestamps
   // are wall-clock based, so expensive rendering must NEVER occur during recording.
@@ -960,13 +997,13 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     }
     update(selected, { colors });
   };
-  const exportPng = () => { const canvas = canvasRef.current; if (!canvas) return; const a = document.createElement('a'); a.download = 'shadex-material.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
+  const exportPng = () => { const canvas = nativeGPU && gpuSupported && gpuRenderer.current ? gpuCanvasRef.current : canvasRef.current; if (!canvas) return; const a = document.createElement('a'); a.download = 'shadex-material.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
   const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, twist, surface, crystal, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
   return <SliderAutomationContext.Provider value={automationContext}><div className="ml-root">
-    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><span className="ml-auto-count" title="Sliders con animación automática activada">↔ {Object.values(autoSliders).filter(Boolean).length}</span><button onClick={exportJson}>Exportar JSON</button><button disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "● Grabando…" : "◉ Exportar video"}</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
+    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><span className="ml-auto-count" title="Sliders con animación automática activada">↔ {Object.values(autoSliders).filter(Boolean).length}</span><button onClick={exportJson}>Exportar JSON</button><button onClick={exportGLSL}>Exportar GLSL</button><button disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "● Grabando…" : "◉ Exportar video"}</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
-    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span className="ml-fps-meter" title="FPS observados y tiempo promedio de renderizado por fotograma">{fpsStats.fps.toFixed(1)} FPS · {fpsStats.renderMs.toFixed(0)} ms/render</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
-    <aside className="ml-properties"><div className="ml-section ml-video-panel"><h4>EXPORTACIÓN DE VIDEO · 24 FPS</h4><p>Primero calcula todos los fotogramas sin grabar; después los codifica a 24 FPS. El renderizado puede tardar, pero no alarga la grabación.</p><label>Duración <select value={videoSeconds} disabled={videoExporting} onChange={e=>setVideoSeconds(Number(e.target.value))}><option value={3}>3 segundos</option><option value={5}>5 segundos</option><option value={10}>10 segundos</option><option value={15}>15 segundos</option></select></label><button className="ml-primary" disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "Grabando…" : "Exportar WebM · 24 FPS"}</button><p role="status">{videoStatus}</p></div><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
+    <main className="ml-stage"><div className="ml-stage-toolbar"><span>{nativeGPU && gpuSupported ? "VISTA PREVIA · WEBGL2 / GLSL" : "VISTA PREVIA · CANVAS 2D"}</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360} style={{display:nativeGPU && gpuSupported ? "none":"block"}}/><canvas ref={gpuCanvasRef} width={360} height={360} style={{display:nativeGPU && gpuSupported ? "block":"none"}}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span className="ml-fps-meter" title="FPS observados y tiempo promedio de renderizado por fotograma">{fpsStats.fps.toFixed(1)} FPS · {fpsStats.renderMs.toFixed(0)} ms/render</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
+    <aside className="ml-properties"><div className="ml-section"><h4>GLSL NATIVE · v1.4.2</h4><label><input type="checkbox" checked={nativeGPU} onChange={e=>setNativeGPU(e.target.checked)}/> Vista previa GPU experimental</label><p>La esfera WebGL2 ejecuta las automatizaciones de luces y campo unificado dentro de GLSL. Crystal Chamber y las superficies siguen en Canvas.</p><button type="button" onClick={exportGLSL}>Exportar GLSL para Shadertoy</button>{gpuError && <p role="alert">{gpuError}</p>}</div><div className="ml-section ml-video-panel"><h4>EXPORTACIÓN DE VIDEO · 24 FPS</h4><p>Primero calcula todos los fotogramas sin grabar; después los codifica a 24 FPS. El renderizado puede tardar, pero no alarga la grabación.</p><label>Duración <select value={videoSeconds} disabled={videoExporting} onChange={e=>setVideoSeconds(Number(e.target.value))}><option value={3}>3 segundos</option><option value={5}>5 segundos</option><option value={10}>10 segundos</option><option value={15}>15 segundos</option></select></label><button className="ml-primary" disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "Grabando…" : "Exportar WebM · 24 FPS"}</button><p role="status">{videoStatus}</p></div><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
       <label><input type="checkbox" checked={surface.enabled} onChange={e=>setSurface(v=>({...v,enabled:e.target.checked}))}/> Activar geometría de lámina</label>
       {surface.enabled && <>
       <label>Deformador <select value={surface.mode} onChange={e=>setSurface(v=>({...v,mode:e.target.value as SurfaceMode}))}><option value="twist-sheet">Twist Sheet</option><option value="bessel">Membrana Bessel (aprox.)</option><option value="waves">Wave Surface</option></select></label>
