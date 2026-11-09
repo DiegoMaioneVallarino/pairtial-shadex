@@ -14,3 +14,6 @@
 .ml-automation-panel p{font-size:11px;color:#9daac1;line-height:1.5}
 .ml-root .ml-auto-clear{width:100%;font-size:11px;margin-top:8px}
 .ml-auto-count{font-size:11px;color:#9bcfff;white-space:nowrap}
+
+/* v1.1 performance readout */
+.ml-fps-meter{font-variant-numeric:tabular-nums;color:#8fdbba;font-size:11px;white-space:nowrap;border:1px solid #355a53;border-radius:7px;padding:5px 8px;background:#0c2422}

@@ -633,31 +633,31 @@ function renderUnified(canvas: HTMLCanvasElement, shape: Shape, u: Unified, enab
   ctx.putImageData(image, 0, 0);
 }
 function SpatialLightsControls({ lights, selected, onSelect, onChange }: {
-  lights: SpatialLight[]; selected: number; onSelect: (id: number) => void; onChange: (lights: SpatialLight[]) => void;
+  lights: SpatialLight[]; selected: number; onSelect: (id: number) => void; onChange: React.Dispatch<React.SetStateAction<SpatialLight[]>>;
 }) {
   const current = lights.find(l => l.id === selected) ?? lights[0];
-  const patch = (changes: Partial<SpatialLight>) => onChange(lights.map(l => l.id === current?.id ? { ...l, ...changes } : l));
+  const patch = (changes: Partial<SpatialLight>) => { const id = current?.id; onChange(prev => prev.map(l => l.id === id ? { ...l, ...changes } : l)); };
   const add = (kind: SpatialLight['kind']) => {
     const id = Math.max(0, ...lights.map(l => l.id)) + 1;
-    onChange([...lights, { id, kind, enabled: true, x: 0, y: 0, angle: 0, radius: 0.7, aspect: 1, intensity: 1, color: '#a8ddff' }]);
+    onChange(prev => [...prev, { id, kind, enabled: true, x: 0, y: 0, angle: 0, radius: 0.7, aspect: 1, intensity: 1, color: '#a8ddff' }]);
     onSelect(id);
   };
   return <div className="ml-section ml-light-editor"><h4>FUENTES ESPACIALES · ILUMINACIÓN COMPARTIDA</h4>
     <p>Cada fuente ilumina superficie y contorno; el contorno propaga el reflejo a las cinco regiones. Coordenadas relativas al objeto.</p>
     <div className="ml-light-actions"><button onClick={() => add('radial')}>+ Radial</button><button onClick={() => add('linear')}>+ Lineal</button></div>
     <div className="ml-light-list">{lights.map(l => <div key={l.id} className={l.id === current?.id ? 'active' : ''}>
-      <input aria-label={`Activar luz ${l.id}`} type="checkbox" checked={l.enabled} onChange={e => onChange(lights.map(item => item.id === l.id ? {...item, enabled: e.target.checked} : item))}/>
+      <input aria-label={`Activar luz ${l.id}`} type="checkbox" checked={l.enabled} onChange={e => onChange(prev => prev.map(item => item.id === l.id ? {...item, enabled: e.target.checked} : item))}/>
       <button onClick={() => onSelect(l.id)}>{l.kind === 'radial' ? '◉' : '▥'} Luz {l.id}</button>
       <span style={{background:l.color}} className="ml-light-swatch"/>
     </div>)}</div>
-    {current && <><div className="ml-light-actions"><button onClick={() => patch({kind: current.kind === 'radial' ? 'linear' : 'radial'})}>Tipo: {current.kind}</button><button disabled={lights.length <= 1} onClick={() => {onChange(lights.filter(l => l.id !== current.id));onSelect(lights.find(l => l.id !== current.id)?.id ?? 0);}}>Eliminar</button></div>
+    {current && <><div className="ml-light-actions"><button onClick={() => patch({kind: current.kind === 'radial' ? 'linear' : 'radial'})}>Tipo: {current.kind}</button><button disabled={lights.length <= 1} onClick={() => {onChange(prev => prev.filter(l => l.id !== current.id));onSelect(lights.find(l => l.id !== current.id)?.id ?? 0);}}>Eliminar</button></div>
       <label className="ml-light-color">Color <input type="color" value={current.color} onChange={e => patch({color:e.target.value})}/></label>
-      <NumberSlider label="Posición X" value={current.x} min={-2} max={2} step={0.01} onChange={x => patch({x})}/>
-      <NumberSlider label="Posición Y" value={current.y} min={-2} max={2} step={0.01} onChange={y => patch({y})}/>
-      <NumberSlider label={current.kind === 'radial' ? 'Radio' : 'Anchura de banda'} value={current.radius} min={0.05} max={2.5} step={0.01} onChange={radius => patch({radius})}/>
-      {current.kind === 'radial' && <NumberSlider label="Proporción elíptica" value={current.aspect} min={0.2} max={2.5} step={0.01} onChange={aspect => patch({aspect})}/>}
-      <NumberSlider label="Rotación (radianes)" value={current.angle} min={-3.14} max={3.14} step={0.01} onChange={angle => patch({angle})}/>
-      <NumberSlider label="Intensidad" value={current.intensity} min={0} max={2.5} step={0.01} onChange={intensity => patch({intensity})}/>
+      <NumberSlider label="Posición X" automationId={`light:${current.id}:x`} value={current.x} min={-2} max={2} step={0.01} onChange={x => patch({x})}/>
+      <NumberSlider label="Posición Y" automationId={`light:${current.id}:y`} value={current.y} min={-2} max={2} step={0.01} onChange={y => patch({y})}/>
+      <NumberSlider label={current.kind === 'radial' ? 'Radio' : 'Anchura de banda'} automationId={`light:${current.id}:radius`} value={current.radius} min={0.05} max={2.5} step={0.01} onChange={radius => patch({radius})}/>
+      {current.kind === 'radial' && <NumberSlider label="Proporción elíptica" automationId={`light:${current.id}:aspect`} value={current.aspect} min={0.2} max={2.5} step={0.01} onChange={aspect => patch({aspect})}/>}
+      <NumberSlider label="Rotación (radianes)" automationId={`light:${current.id}:angle`} value={current.angle} min={-3.14} max={3.14} step={0.01} onChange={angle => patch({angle})}/>
+      <NumberSlider label="Intensidad" automationId={`light:${current.id}:intensity`} value={current.intensity} min={0} max={2.5} step={0.01} onChange={intensity => patch({intensity})}/>
     </>}
   </div>;
 }
@@ -684,13 +684,14 @@ type SliderAutomation = {
 type SliderDriver = { value: number; min: number; max: number; step: number; onChange: (value: number) => void };
 const SliderAutomationContext = createContext<SliderAutomation | null>(null);
 
-function NumberSlider({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; canAutomate?: boolean }) {
+function NumberSlider({ label, value, min, max, step = 1, onChange, automationId }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; canAutomate?: boolean; automationId?: string }) {
   const automation = useContext(SliderAutomationContext);
-  const id = useId();
+  const generatedId = useId();
+  const id = automationId ?? generatedId;
   const latest = useRef<SliderDriver>({ value, min, max, step, onChange });
   latest.current = { value, min, max, step, onChange };
   useEffect(() => {
-    if (!automation) return;
+    if (!automation || automationId) return;
     // Keep a stable driver object; its values and callback always stay current.
     const driver: SliderDriver = {
       get value() { return latest.current.value; },
@@ -701,7 +702,7 @@ function NumberSlider({ label, value, min, max, step = 1, onChange }: { label: s
     };
     automation.register(id, driver);
     return () => automation.unregister(id);
-  }, [automation?.register, automation?.unregister, id]);
+  }, [automation?.register, automation?.unregister, id, automationId]);
   const active = !!automation?.active[id];
   return <div className={`ml-slider ${active ? 'ml-slider-automated' : ''}`}>
     <div className="ml-slider-heading"><span>{label}</span><div className="ml-slider-actions"><strong>{Number(value.toFixed(2))}</strong>{automation && <button type="button" className="ml-slider-auto" aria-label={`${active ? 'Desactivar' : 'Activar'} animación automática de ${label}`} aria-pressed={active} title={active ? 'Detener animación de este slider' : 'Animar de izquierda a derecha y regresar'} onClick={() => automation.toggle(id)}>{active ? '◆' : '↔'}</button>}</div></div>
@@ -732,6 +733,7 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const [surface, setSurface] = useState<SurfaceSettings>(initialSurface);
   const [crystal, setCrystal] = useState<CrystalSettings>(initialCrystal);
   const [autoSliders, setAutoSliders] = useState<Record<string, boolean>>({});
+  const [fpsStats, setFpsStats] = useState({ fps: 0, renderMs: 0 });
   const [autoSpeed, setAutoSpeed] = useState(0.25); // full slider ranges per second
   const drivers = useRef(new Map<string, SliderDriver>());
   const motion = useRef(new Map<string, { position: number; direction: 1 | -1 }>());
@@ -748,6 +750,34 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
       return { ...prev, [id]: !prev[id] };
     });
   });
+  // All light drivers stay registered even when another light is selected.
+  // IDs are based on light identity + property, never the mounted slider position.
+  const lightsLatest = useRef(lights);
+  lightsLatest.current = lights;
+  useEffect(() => {
+    const fields: Array<[keyof SpatialLight, number, number, number]> = [
+      ['x', -2, 2, 0.01], ['y', -2, 2, 0.01],
+      ['radius', 0.05, 2.5, 0.01], ['aspect', 0.2, 2.5, 0.01],
+      ['angle', -3.14, 3.14, 0.01], ['intensity', 0, 2.5, 0.01],
+    ];
+    const valid = new Set<string>();
+    for (const light of lights) for (const [field, min, max, step] of fields) {
+      const id = `light:${light.id}:${field}`;
+      valid.add(id);
+      if (drivers.current.has(id)) continue;
+      drivers.current.set(id, {
+        get value() { return Number(lightsLatest.current.find(l => l.id === light.id)?.[field] ?? min); },
+        min, max, step,
+        onChange: value => setLights(prev => prev.map(l => l.id === light.id ? { ...l, [field]: value } : l)),
+      });
+    }
+    for (const id of drivers.current.keys()) {
+      if (id.startsWith('light:') && !valid.has(id)) {
+        drivers.current.delete(id);
+        motion.current.delete(id);
+      }
+    }
+  }, [lights]);
   const automationContext: SliderAutomation = {
     active: autoSliders, toggle: toggleSlider.current,
     register: registerSlider.current, unregister: unregisterSlider.current,
@@ -783,9 +813,11 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal };
   useEffect(() => {
     let frame = 0, raf = 0;
+    let sampleStart = performance.now(), sampleFrames = 0, renderSum = 0;
     const base=document.createElement('canvas'), sheet=document.createElement('canvas');
     base.width=sheet.width=360; base.height=sheet.height=360;
     const tick = () => {
+      const renderStart = performance.now();
       const canvas = canvasRef.current;
       if (canvas) {
         const v = snapshot.current;
@@ -802,6 +834,15 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
         else render(canvas, v.shape, v.settings, v.animate ? frame / 60 : 0);
       }
       frame++;
+      sampleFrames++;
+      renderSum += performance.now() - renderStart;
+      const elapsed = performance.now() - sampleStart;
+      if (elapsed >= 1000) {
+        setFpsStats({ fps: sampleFrames * 1000 / elapsed, renderMs: renderSum / sampleFrames });
+        sampleFrames = 0;
+        renderSum = 0;
+        sampleStart = performance.now();
+      }
       raf = window.setTimeout(tick, snapshot.current.animate ? 50 : 150) as unknown as number;
     };
     tick();
@@ -822,7 +863,7 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   return <SliderAutomationContext.Provider value={automationContext}><div className="ml-root">
     <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><span className="ml-auto-count" title="Sliders con animación automática activada">↔ {Object.values(autoSliders).filter(Boolean).length}</span><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
-    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
+    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span className="ml-fps-meter" title="FPS observados y tiempo promedio de renderizado por fotograma">{fpsStats.fps.toFixed(1)} FPS · {fpsStats.renderMs.toFixed(0)} ms/render</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
     <aside className="ml-properties"><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
       <label><input type="checkbox" checked={surface.enabled} onChange={e=>setSurface(v=>({...v,enabled:e.target.checked}))}/> Activar geometría de lámina</label>
       {surface.enabled && <>
