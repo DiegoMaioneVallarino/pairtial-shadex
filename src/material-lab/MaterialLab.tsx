@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import './MaterialLab.css';
 
 type Shape = 'circle' | 'sphere' | 'rounded' | 'diamond';
@@ -673,8 +673,40 @@ function UnifiedControls({ value, onChange }: { value: Unified; onChange: (patch
   const palette = (key: 'colorsSurface' | 'colorsEdge', title: string) => <div className="ml-section"><h4>{title}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${value[key].map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/><div className="ml-colors">{value[key].map((c,i) => <ColorEditor key={i} label={`Color ${i+1} · ${i*25}%`} value={c} onChange={next => onChange({ [key]: value[key].map((old,j) => j === i ? next : old) })}/>)}</div></div>;
   return <><p>Una sola función periódica alimenta las cinco regiones. Dos paletas describen la respuesta de la superficie y el borde.</p><div className="ml-section"><h4>CAMPO MAESTRO · UNA SOLA CURVA</h4><MasterCurve value={value}/>{slider('Ciclos completos', 'cycles', 1, 12, 1)}{slider('Amplitud', 'amplitude', 0, 1)}{slider('Fase', 'phase', 0, 6.28)}{slider('Velocidad', 'animateSpeed', 0, 2)}{slider('Luz ambiente', 'ambient', 0, 0.5)}</div>{palette('colorsSurface','REFLECTANCIA · SUPERFICIE')}{palette('colorsEdge','REFLECTANCIA · BORDE')}<div className="ml-section"><h4>RESPUESTA MATERIAL</h4>{slider('Reflectancia superficial', 'surfaceResponse', 0, 2)}{slider('Reflectancia de borde', 'edgeResponse', 0, 2)}{slider('Emisión / dispersión', 'emission', 0, 2)}{slider('Rebote al fondo', 'backgroundBounce', 0, 2)}</div><div className="ml-section"><h4>PROPAGACIÓN DESDE EL CONTORNO</h4>{slider('Grosor de borde', 'edgeWidth', 2, 35, 1)}{slider('Alcance interior', 'innerReach', 1, 110, 1)}{slider('Alcance exterior', 'outerReach', 1, 130, 1)}{slider('Alcance del fondo', 'backgroundReach', 1, 200, 1)}{slider('Suavidad', 'softness', 0, 1)}</div><button className="ml-reset" onClick={() => onChange(unifiedInitial)}>Restablecer campo</button></>;
 }
-function NumberSlider({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void }) {
-  return <label className="ml-slider"><span>{label}<strong>{Number(value.toFixed(2))}</strong></span><input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))} /></label>;
+// Per-slider automation: each mounted slider registers its current setter.
+// Animation uses elapsed time, not frame count, and bounces at both endpoints.
+type SliderAutomation = {
+  active: Record<string, boolean>;
+  toggle: (id: string) => void;
+  register: (id: string, spec: SliderDriver) => void;
+  unregister: (id: string) => void;
+};
+type SliderDriver = { value: number; min: number; max: number; step: number; onChange: (value: number) => void };
+const SliderAutomationContext = createContext<SliderAutomation | null>(null);
+
+function NumberSlider({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; canAutomate?: boolean }) {
+  const automation = useContext(SliderAutomationContext);
+  const id = useId();
+  const latest = useRef<SliderDriver>({ value, min, max, step, onChange });
+  latest.current = { value, min, max, step, onChange };
+  useEffect(() => {
+    if (!automation) return;
+    // Keep a stable driver object; its values and callback always stay current.
+    const driver: SliderDriver = {
+      get value() { return latest.current.value; },
+      get min() { return latest.current.min; },
+      get max() { return latest.current.max; },
+      get step() { return latest.current.step; },
+      onChange: next => latest.current.onChange(next),
+    };
+    automation.register(id, driver);
+    return () => automation.unregister(id);
+  }, [automation?.register, automation?.unregister, id]);
+  const active = !!automation?.active[id];
+  return <div className={`ml-slider ${active ? 'ml-slider-automated' : ''}`}>
+    <div className="ml-slider-heading"><span>{label}</span><div className="ml-slider-actions"><strong>{Number(value.toFixed(2))}</strong>{automation && <button type="button" className="ml-slider-auto" aria-label={`${active ? 'Desactivar' : 'Activar'} animación automática de ${label}`} aria-pressed={active} title={active ? 'Detener animación de este slider' : 'Animar de izquierda a derecha y regresar'} onClick={() => automation.toggle(id)}>{active ? '◆' : '↔'}</button>}</div></div>
+    <input aria-label={label} type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))} />
+  </div>;
 }
 function Curve({ effect }: { effect: Effect }) {
   const path = Array.from({ length: 161 }, (_, i) => {
@@ -699,6 +731,53 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const [twist, setTwist] = useState<TwistSettings>(initialTwist);
   const [surface, setSurface] = useState<SurfaceSettings>(initialSurface);
   const [crystal, setCrystal] = useState<CrystalSettings>(initialCrystal);
+  const [autoSliders, setAutoSliders] = useState<Record<string, boolean>>({});
+  const [autoSpeed, setAutoSpeed] = useState(0.25); // full slider ranges per second
+  const drivers = useRef(new Map<string, SliderDriver>());
+  const motion = useRef(new Map<string, { position: number; direction: 1 | -1 }>());
+  const automationRunning = useRef({ active: autoSliders, speed: autoSpeed, playing: animate });
+  automationRunning.current = { active: autoSliders, speed: autoSpeed, playing: animate };
+  const registerSlider = useRef((id: string, driver: SliderDriver) => { drivers.current.set(id, driver); });
+  const unregisterSlider = useRef((id: string) => { drivers.current.delete(id); });
+  const toggleSlider = useRef((id: string) => {
+    setAutoSliders(prev => {
+      if (!prev[id]) {
+        const driver = drivers.current.get(id);
+        if (driver) motion.current.set(id, { position: driver.value, direction: 1 });
+      } else motion.current.delete(id);
+      return { ...prev, [id]: !prev[id] };
+    });
+  });
+  const automationContext: SliderAutomation = {
+    active: autoSliders, toggle: toggleSlider.current,
+    register: registerSlider.current, unregister: unregisterSlider.current,
+  };
+  useEffect(() => {
+    let previous = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.15, (now - previous) / 1000);
+      previous = now;
+      const { active, speed, playing } = automationRunning.current;
+      if (!playing) return;
+      for (const [id, driver] of drivers.current) {
+        if (!active[id] || driver.max <= driver.min) continue;
+        const range = driver.max - driver.min;
+        const state = motion.current.get(id) ?? { position: driver.value, direction: 1 as const };
+        let position = state.position + state.direction * range * speed * dt;
+        let direction: 1 | -1 = state.direction;
+        while (position > driver.max || position < driver.min) {
+          if (position > driver.max) { position = 2 * driver.max - position; direction = -1; }
+          else { position = 2 * driver.min - position; direction = 1; }
+        }
+        const step = driver.step > 0 ? driver.step : 0.01;
+        const quantized = Math.max(driver.min, Math.min(driver.max, driver.min + Math.round((position - driver.min) / step) * step));
+        motion.current.set(id, { position, direction });
+        if (Math.abs(quantized - driver.value) > step * 0.001) driver.onChange(Number(quantized.toFixed(6)));
+      }
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal });
   snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal };
@@ -740,11 +819,11 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   };
   const exportPng = () => { const canvas = canvasRef.current; if (!canvas) return; const a = document.createElement('a'); a.download = 'shadex-material.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
   const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, twist, surface, crystal, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
-  return <div className="ml-root">
-    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
+  return <SliderAutomationContext.Provider value={automationContext}><div className="ml-root">
+    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><span className="ml-auto-count" title="Sliders con animación automática activada">↔ {Object.values(autoSliders).filter(Boolean).length}</span><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
     <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
-    <aside className="ml-properties">{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
+    <aside className="ml-properties"><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
       <label><input type="checkbox" checked={surface.enabled} onChange={e=>setSurface(v=>({...v,enabled:e.target.checked}))}/> Activar geometría de lámina</label>
       {surface.enabled && <>
       <label>Deformador <select value={surface.mode} onChange={e=>setSurface(v=>({...v,mode:e.target.value as SurfaceMode}))}><option value="twist-sheet">Twist Sheet</option><option value="bessel">Membrana Bessel (aprox.)</option><option value="waves">Wave Surface</option></select></label>
@@ -768,5 +847,5 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
         <NumberSlider label="Realce del borde" value={crystal.rimBoost} min={0} max={1} step={.01} onChange={rimBoost=>setCrystal(v=>({...v,rimBoost}))}/>
       </>}</div>}
       {spatialMode && <div className="ml-section"><h4>TWISTED SPHERE · 2.5D</h4><label><input type="checkbox" checked={twist.enabled} onChange={e => setTwist(v => ({...v, enabled:e.target.checked}))}/> Activar torsión</label><NumberSlider label="Torsión" value={twist.amount} min={0} max={2.5} step={0.05} onChange={amount => setTwist(v => ({...v, amount}))}/><NumberSlider label="Bandas" value={twist.bands} min={1} max={8} step={1} onChange={bands => setTwist(v => ({...v, bands}))}/><NumberSlider label="Rotación / fase" value={twist.rotation} min={-3.14} max={3.14} step={0.05} onChange={rotation => setTwist(v => ({...v, rotation}))}/><NumberSlider label="Deformación silueta" value={twist.silhouette} min={0} max={0.3} step={0.01} onChange={silhouette => setTwist(v => ({...v, silhouette}))}/><label><input type="checkbox" checked={twist.attached} onChange={e => setTwist(v => ({...v, attached:e.target.checked}))}/> Luces adheridas a superficie (desmarcar = luces fijas)</label><p>Prueba 2.5D: deforma coordenadas de superficie y silueta sin malla 3D. Selecciona Esfera 3D*.</p></div>}{spatialMode && <SpatialLightsControls lights={lights} selected={selectedLight} onSelect={setSelectedLight} onChange={setLights}/>}<div className="ml-properties-title"><h3>Unified Light Field</h3><span>EXPERIMENTAL</span></div><UnifiedControls value={unified} onChange={patch => setUnified(prev => ({ ...prev, ...patch }))}/></> : <><div className="ml-properties-title"><h3>{effects.find(e => e.id === selected)?.name}</h3><span>PROPIEDADES</span></div><p>{effects.find(e => e.id === selected)?.subtitle}</p><div className="ml-section"><h4>{selected === 'edge' ? 'GRADIENTE DE CONTORNO · CÍCLICO' : 'GRADIENTE RGBA'}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${effect.colors.map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/>{selected === 'edge' && <p className="ml-contour-hint">Cinco stops RGBA distribuidos por longitud de arco. El quinto se sincroniza con el primero para cerrar el contorno sin costuras.</p>}<div className="ml-colors">{effect.colors.map((color, i) => <ColorEditor key={i} label={`Color ${i + 1} · ${i * 25}%${selected === 'edge' && i === 4 ? ' (cierre)' : ''}`} value={color} onChange={c => updateColor(i, c)}/>)}</div></div><div className="ml-section"><h4>{selected === 'surface' || selected === 'background' ? 'CAMPO RADIAL' : 'ANCHURA Y DENSIDAD'}</h4><NumberSlider label={selected === 'outer' ? 'Extensión gaussiana' : selected === 'surface' || selected === 'background' ? 'Radio' : 'Anchura'} value={effect.width} min={2} max={220} onChange={width => update(selected, { width })}/><NumberSlider label="Suavidad" value={effect.softness} min={0} max={1} step={0.01} onChange={softness => update(selected, { softness })}/>{(selected === 'surface' || selected === 'background') && <><NumberSlider label="Centro X" value={effect.centerX} min={-1.5} max={1.5} step={0.01} onChange={centerX => update(selected, { centerX })}/><NumberSlider label="Centro Y" value={effect.centerY} min={-1.5} max={1.5} step={0.01} onChange={centerY => update(selected, { centerY })}/></>}</div><div className="ml-section"><h4>MODULACIÓN SINUSOIDAL</h4><Curve effect={effect}/><NumberSlider label="Amplitud" value={effect.amplitude} min={0} max={1} step={0.01} onChange={amplitude => update(selected, { amplitude })}/><NumberSlider label="Frecuencia" value={effect.frequency} min={1} max={16} step={1} onChange={frequency => update(selected, { frequency })}/><NumberSlider label="Fase" value={effect.phase} min={0} max={6.28} step={0.01} onChange={phase => update(selected, { phase })}/></div><button className="ml-reset" onClick={() => update(selected, initial[selected])}>Restablecer efecto</button></>}</aside></div>
-  </div>;
+  </div></SliderAutomationContext.Provider>;
 }
