@@ -17,3 +17,6 @@
 
 /* v1.1 performance readout */
 .ml-fps-meter{font-variant-numeric:tabular-nums;color:#8fdbba;font-size:11px;white-space:nowrap;border:1px solid #355a53;border-radius:7px;padding:5px 8px;background:#0c2422}
+
+/* v1.2 — video capture */
+.ml-video-panel p{font-size:11px;line-height:1.5;color:#9daac1}.ml-video-panel label{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;margin:12px 0}.ml-video-panel select{background:#1b263a;color:#e9edff;border:1px solid #38465e;border-radius:7px;padding:7px}.ml-video-panel button{width:100%}.ml-root button:disabled{opacity:.5;cursor:wait}

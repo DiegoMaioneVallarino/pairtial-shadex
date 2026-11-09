@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import './MaterialLab.css';
 
 type Shape = 'circle' | 'sphere' | 'rounded' | 'diamond';
@@ -734,6 +735,10 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const [crystal, setCrystal] = useState<CrystalSettings>(initialCrystal);
   const [autoSliders, setAutoSliders] = useState<Record<string, boolean>>({});
   const [fpsStats, setFpsStats] = useState({ fps: 0, renderMs: 0 });
+  const [videoSeconds, setVideoSeconds] = useState(5);
+  const [videoStatus, setVideoStatus] = useState('');
+  const [videoExporting, setVideoExporting] = useState(false);
+  const exportBusy = useRef(false);
   const [autoSpeed, setAutoSpeed] = useState(0.25); // full slider ranges per second
   const drivers = useRef(new Map<string, SliderDriver>());
   const motion = useRef(new Map<string, { position: number; direction: 1 | -1 }>());
@@ -789,7 +794,7 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
       const dt = Math.min(0.15, (now - previous) / 1000);
       previous = now;
       const { active, speed, playing } = automationRunning.current;
-      if (!playing) return;
+      if (!playing || exportBusy.current) return;
       for (const [id, driver] of drivers.current) {
         if (!active[id] || driver.max <= driver.min) continue;
         const range = driver.max - driver.min;
@@ -811,43 +816,122 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal });
   snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal };
+  // One render path for preview and video, so exports include the exact same layers.
+  const buffers = useRef<{ base: HTMLCanvasElement; sheet: HTMLCanvasElement } | null>(null);
+  function drawScene(canvas: HTMLCanvasElement, v: typeof snapshot.current, time: number) {
+    if (!buffers.current) {
+      const base = document.createElement('canvas'), sheet = document.createElement('canvas');
+      base.width = sheet.width = 360; base.height = sheet.height = 360;
+      buffers.current = { base, sheet };
+    }
+    const { base, sheet } = buffers.current;
+    const enabled = { edge:v.settings.edge.enabled, inner:v.settings.inner.enabled, outer:v.settings.outer.enabled, surface:v.settings.surface.enabled, background:v.settings.background.enabled };
+    if (v.unifiedMode && v.spatialMode && v.surface.enabled && v.crystal.enabled && v.shape === 'sphere') {
+      renderSpatial(base,v.shape,v.unified,v.lights,enabled,time,{...v.twist,enabled:false});
+      renderSurface(sheet,v.surface,v.unified,v.lights,enabled,time);
+      renderCrystal(canvas,base,sheet,v.crystal);
+    } else if (v.unifiedMode && v.spatialMode && v.surface.enabled) renderSurface(canvas,v.surface,v.unified,v.lights,enabled,time);
+    else if (v.unifiedMode && v.spatialMode) renderSpatial(canvas,v.shape,v.unified,v.lights,enabled,time,v.twist);
+    else if (v.unifiedMode) renderUnified(canvas,v.shape,v.unified,enabled,time);
+    else render(canvas,v.shape,v.settings,time);
+  }
   useEffect(() => {
-    let frame = 0, raf = 0;
+    let frame = 0, timer = 0;
     let sampleStart = performance.now(), sampleFrames = 0, renderSum = 0;
-    const base=document.createElement('canvas'), sheet=document.createElement('canvas');
-    base.width=sheet.width=360; base.height=sheet.height=360;
     const tick = () => {
-      const renderStart = performance.now();
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const v = snapshot.current;
-        if (v.unifiedMode && v.spatialMode && v.surface.enabled && v.crystal.enabled && v.shape === 'sphere') {
-          const enabled={ edge:v.settings.edge.enabled,inner:v.settings.inner.enabled,outer:v.settings.outer.enabled,surface:v.settings.surface.enabled,background:v.settings.background.enabled };
-          const time=v.animate?frame/60:0;
-          renderSpatial(base,v.shape,v.unified,v.lights,enabled,time,{...v.twist,enabled:false});
-          renderSurface(sheet,v.surface,v.unified,v.lights,enabled,time);
-          renderCrystal(canvas,base,sheet,v.crystal);
+      if (!exportBusy.current) {
+        const renderStart = performance.now();
+        const canvas = canvasRef.current;
+        if (canvas) drawScene(canvas, snapshot.current, snapshot.current.animate ? frame / 60 : 0);
+        frame++;
+        sampleFrames++;
+        renderSum += performance.now() - renderStart;
+        const elapsed = performance.now() - sampleStart;
+        if (elapsed >= 1000) {
+          setFpsStats({ fps: sampleFrames * 1000 / elapsed, renderMs: renderSum / sampleFrames });
+          sampleFrames = 0; renderSum = 0; sampleStart = performance.now();
         }
-        else if (v.unifiedMode && v.spatialMode && v.surface.enabled) renderSurface(canvas, v.surface, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
-        else if (v.unifiedMode && v.spatialMode) renderSpatial(canvas, v.shape, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0, v.twist);
-        else if (v.unifiedMode) renderUnified(canvas, v.shape, v.unified, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
-        else render(canvas, v.shape, v.settings, v.animate ? frame / 60 : 0);
+      } else {
+        sampleStart = performance.now(); sampleFrames = 0; renderSum = 0;
       }
-      frame++;
-      sampleFrames++;
-      renderSum += performance.now() - renderStart;
-      const elapsed = performance.now() - sampleStart;
-      if (elapsed >= 1000) {
-        setFpsStats({ fps: sampleFrames * 1000 / elapsed, renderMs: renderSum / sampleFrames });
-        sampleFrames = 0;
-        renderSum = 0;
-        sampleStart = performance.now();
-      }
-      raf = window.setTimeout(tick, snapshot.current.animate ? 50 : 150) as unknown as number;
+      timer = window.setTimeout(tick, snapshot.current.animate ? 50 : 150);
     };
     tick();
-    return () => window.clearTimeout(raf);
+    return () => window.clearTimeout(timer);
   }, []);
+  // Export uses a dedicated canvas and exactly 24 requested captures per second.
+  // The automation clock is advanced by fixed 1/24-second steps (not wall-clock time).
+  // MediaRecorder is real-time: slow devices may still drop encoded frames.
+  const exportVideo = async () => {
+    if (exportBusy.current) return;
+    if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) {
+      setVideoStatus('Este navegador no permite grabar video desde Canvas.'); return;
+    }
+    const mime = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+    if (!mime) { setVideoStatus('No hay un codificador WebM compatible.'); return; }
+    exportBusy.current = true; setVideoExporting(true); setVideoStatus('Preparando grabación…');
+    const oldPlaying = automationRunning.current.playing;
+    const oldMotion = new Map([...motion.current].map(([id,m]) => [id,{...m}] as const));
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 360;
+    let stream: MediaStream | undefined;
+    let recorder: MediaRecorder | undefined;
+    try {
+      stream = canvas.captureStream(0);
+      const track = stream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void };
+      if (!track?.requestFrame) throw new Error('El navegador no permite capturar fotogramas manualmente.');
+      recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
+      const chunks: Blob[] = [];
+      const finished = new Promise<Blob>((resolve,reject) => {
+        recorder!.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+        recorder!.onstop = () => resolve(new Blob(chunks,{type:mime}));
+        recorder!.onerror = () => reject(new Error('Error del codificador de video.'));
+      });
+      recorder.start();
+      const total = Math.round(videoSeconds * 24);
+      const start = performance.now();
+      for (let i=0; i<total; i++) {
+        // Advance every selected slider once using its own ID and limits.
+        flushSync(() => {
+          for (const [id, driver] of drivers.current) {
+            if (!automationRunning.current.active[id] || driver.max <= driver.min) continue;
+            const range = driver.max - driver.min;
+            const m = motion.current.get(id) ?? {position:driver.value,direction:1 as const};
+            let position = m.position + m.direction * range * automationRunning.current.speed / 24;
+            let direction: 1 | -1 = m.direction;
+            while (position > driver.max || position < driver.min) {
+              if (position > driver.max) { position = 2*driver.max-position; direction=-1; }
+              else { position=2*driver.min-position; direction=1; }
+            }
+            motion.current.set(id,{position,direction});
+            const step=driver.step>0?driver.step:0.01;
+            const value=Math.max(driver.min,Math.min(driver.max,driver.min+Math.round((position-driver.min)/step)*step));
+            driver.onChange(Number(value.toFixed(6)));
+          }
+        });
+        drawScene(canvas,snapshot.current,i/24);
+        track.requestFrame();
+        if (i%6===0) setVideoStatus(`Grabando: ${i+1} / ${total} fotogramas · 24 FPS`);
+        // Respect the capture cadence; don't create a variable-speed video.
+        const due = start + (i+1)*1000/24;
+        await new Promise<void>(resolve => window.setTimeout(resolve,Math.max(0,due-performance.now())));
+      }
+      recorder.stop();
+      const blob = await finished;
+      if (!blob.size) throw new Error('La grabación no produjo datos.');
+      const url=URL.createObjectURL(blob), a=document.createElement('a');
+      a.href=url; a.download='shadex-crystal-chamber-24fps.webm'; a.click();
+      window.setTimeout(()=>URL.revokeObjectURL(url),30000);
+      setVideoStatus(`Video exportado · ${videoSeconds} s · 24 FPS solicitados`);
+    } catch (error) {
+      setVideoStatus(error instanceof Error ? error.message : 'Error al exportar video.');
+      if (recorder?.state==='recording') recorder.stop();
+    } finally {
+      stream?.getTracks().forEach(track=>track.stop());
+      motion.current=oldMotion;
+      automationRunning.current.playing=oldPlaying;
+      exportBusy.current=false; setVideoExporting(false);
+    }
+  };
   const update = (id: EffectId, patch: Partial<Effect>) => setSettings(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   const effect = settings[selected];
   const updateColor = (index: number, color: RGBA) => {
@@ -861,10 +945,10 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const exportPng = () => { const canvas = canvasRef.current; if (!canvas) return; const a = document.createElement('a'); a.download = 'shadex-material.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
   const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, twist, surface, crystal, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
   return <SliderAutomationContext.Provider value={automationContext}><div className="ml-root">
-    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><span className="ml-auto-count" title="Sliders con animación automática activada">↔ {Object.values(autoSliders).filter(Boolean).length}</span><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
+    <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><span className="ml-auto-count" title="Sliders con animación automática activada">↔ {Object.values(autoSliders).filter(Boolean).length}</span><button onClick={exportJson}>Exportar JSON</button><button disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "● Grabando…" : "◉ Exportar video"}</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
     <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span className="ml-fps-meter" title="FPS observados y tiempo promedio de renderizado por fotograma">{fpsStats.fps.toFixed(1)} FPS · {fpsStats.renderMs.toFixed(0)} ms/render</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
-    <aside className="ml-properties"><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
+    <aside className="ml-properties"><div className="ml-section ml-video-panel"><h4>EXPORTACIÓN DE VIDEO · 24 FPS</h4><p>Graba la esfera, Crystal Chamber y los sliders automatizados en WebM. Durante la exportación se utiliza un reloj de animación de 24 pasos por segundo.</p><label>Duración <select value={videoSeconds} disabled={videoExporting} onChange={e=>setVideoSeconds(Number(e.target.value))}><option value={3}>3 segundos</option><option value={5}>5 segundos</option><option value={10}>10 segundos</option><option value={15}>15 segundos</option></select></label><button className="ml-primary" disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "Grabando…" : "Exportar WebM · 24 FPS"}</button><p role="status">{videoStatus}</p></div><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
       <label><input type="checkbox" checked={surface.enabled} onChange={e=>setSurface(v=>({...v,enabled:e.target.checked}))}/> Activar geometría de lámina</label>
       {surface.enabled && <>
       <label>Deformador <select value={surface.mode} onChange={e=>setSurface(v=>({...v,mode:e.target.value as SurfaceMode}))}><option value="twist-sheet">Twist Sheet</option><option value="bessel">Membrana Bessel (aprox.)</option><option value="waves">Wave Surface</option></select></label>
