@@ -859,48 +859,41 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     tick();
     return () => window.clearTimeout(timer);
   }, []);
-  // Export uses a dedicated canvas and exactly 24 requested captures per second.
-  // The automation clock is advanced by fixed 1/24-second steps (not wall-clock time).
-  // MediaRecorder is real-time: slow devices may still drop encoded frames.
+  // Offline frame generation followed by real-time encoding. MediaRecorder timestamps
+  // are wall-clock based, so expensive rendering must NEVER occur during recording.
   const exportVideo = async () => {
     if (exportBusy.current) return;
-    if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) {
-      setVideoStatus('Este navegador no permite grabar video desde Canvas.'); return;
+    if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream || typeof createImageBitmap === 'undefined') {
+      setVideoStatus('Este navegador no permite exportar video desde Canvas.'); return;
     }
     const mime = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t => MediaRecorder.isTypeSupported(t));
     if (!mime) { setVideoStatus('No hay un codificador WebM compatible.'); return; }
-    exportBusy.current = true; setVideoExporting(true); setVideoStatus('Preparando grabación…');
+    exportBusy.current = true; setVideoExporting(true);
     const oldPlaying = automationRunning.current.playing;
     const oldMotion = new Map([...motion.current].map(([id,m]) => [id,{...m}] as const));
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 360;
+    const renderCanvas = document.createElement('canvas'); renderCanvas.width = renderCanvas.height = 360;
+    const ctx = canvas.getContext('2d', { alpha:false });
     let stream: MediaStream | undefined;
     let recorder: MediaRecorder | undefined;
+    const frames: ImageBitmap[] = [];
     try {
-      stream = canvas.captureStream(0);
-      const track = stream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void };
-      if (!track?.requestFrame) throw new Error('El navegador no permite capturar fotogramas manualmente.');
-      recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
-      const chunks: Blob[] = [];
-      const finished = new Promise<Blob>((resolve,reject) => {
-        recorder!.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-        recorder!.onstop = () => resolve(new Blob(chunks,{type:mime}));
-        recorder!.onerror = () => reject(new Error('Error del codificador de video.'));
-      });
-      recorder.start();
-      const total = Math.round(videoSeconds * 24);
-      const start = performance.now();
+      if (!ctx) throw new Error('No se pudo crear el lienzo de exportación.');
+      const fps = 24, total = Math.round(videoSeconds * fps);
+      automationRunning.current.playing = false;
+      // Phase 1: calculate each frame at a deterministic animation time.
+      // Rendering may take minutes; it has no influence on the resulting duration.
       for (let i=0; i<total; i++) {
-        // Advance every selected slider once using its own ID and limits.
         flushSync(() => {
           for (const [id, driver] of drivers.current) {
             if (!automationRunning.current.active[id] || driver.max <= driver.min) continue;
             const range = driver.max - driver.min;
             const m = motion.current.get(id) ?? {position:driver.value,direction:1 as const};
-            let position = m.position + m.direction * range * automationRunning.current.speed / 24;
-            let direction: 1 | -1 = m.direction;
+            let position = m.position + m.direction * range * automationRunning.current.speed / fps;
+            let direction:1|-1 = m.direction;
             while (position > driver.max || position < driver.min) {
-              if (position > driver.max) { position = 2*driver.max-position; direction=-1; }
-              else { position=2*driver.min-position; direction=1; }
+              if (position > driver.max) {position=2*driver.max-position; direction=-1;}
+              else {position=2*driver.min-position; direction=1;}
             }
             motion.current.set(id,{position,direction});
             const step=driver.step>0?driver.step:0.01;
@@ -908,24 +901,49 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
             driver.onChange(Number(value.toFixed(6)));
           }
         });
-        drawScene(canvas,snapshot.current,i/24);
-        track.requestFrame();
-        if (i%6===0) setVideoStatus(`Grabando: ${i+1} / ${total} fotogramas · 24 FPS`);
-        // Respect the capture cadence; don't create a variable-speed video.
-        const due = start + (i+1)*1000/24;
-        await new Promise<void>(resolve => window.setTimeout(resolve,Math.max(0,due-performance.now())));
+        drawScene(renderCanvas,snapshot.current,i/fps);
+        frames.push(await createImageBitmap(renderCanvas));
+        if (i%6===0) {
+          setVideoStatus(`Renderizando fotogramas: ${i+1}/${total} (sin límite de tiempo)`);
+          await new Promise<void>(resolve => window.setTimeout(resolve,0));
+        }
       }
+      // Phase 2: only cheap bitmap blits happen while the recorder is running.
+      // MediaRecorder has no explicit frame timestamps; real-time pacing is required.
+      stream = canvas.captureStream(0);
+      const track = stream.getVideoTracks()[0] as MediaStreamTrack & {requestFrame?:()=>void};
+      if (!track?.requestFrame) throw new Error('El navegador no permite capturar fotogramas manualmente.');
+      recorder = new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:5_000_000});
+      const chunks:Blob[]=[];
+      const finished = new Promise<Blob>((resolve,reject)=>{
+        recorder!.ondataavailable=e=>{if(e.data.size) chunks.push(e.data);};
+        recorder!.onstop=()=>resolve(new Blob(chunks,{type:mime}));
+        recorder!.onerror=()=>reject(new Error('Error del codificador de video.'));
+      });
+      recorder.start();
+      const start=performance.now();
+      for(let i=0;i<total;i++) {
+        const due=start+i*1000/fps;
+        const wait=due-performance.now();
+        if(wait>0) await new Promise<void>(resolve=>window.setTimeout(resolve,wait));
+        ctx.drawImage(frames[i],0,0);
+        track.requestFrame();
+        if(i%12===0) setVideoStatus(`Codificando: ${i+1}/${total} · 24 FPS`);
+      }
+      const remaining=start+videoSeconds*1000-performance.now();
+      if(remaining>0) await new Promise<void>(resolve=>window.setTimeout(resolve,remaining));
       recorder.stop();
-      const blob = await finished;
-      if (!blob.size) throw new Error('La grabación no produjo datos.');
+      const blob=await finished;
+      if(!blob.size) throw new Error('La grabación no produjo datos.');
       const url=URL.createObjectURL(blob), a=document.createElement('a');
       a.href=url; a.download='shadex-crystal-chamber-24fps.webm'; a.click();
       window.setTimeout(()=>URL.revokeObjectURL(url),30000);
       setVideoStatus(`Video exportado · ${videoSeconds} s · 24 FPS solicitados`);
-    } catch (error) {
-      setVideoStatus(error instanceof Error ? error.message : 'Error al exportar video.');
-      if (recorder?.state==='recording') recorder.stop();
+    } catch(error) {
+      setVideoStatus(error instanceof Error?error.message:'Error al exportar video.');
+      if(recorder?.state==='recording') recorder.stop();
     } finally {
+      frames.forEach(frame=>frame.close());
       stream?.getTracks().forEach(track=>track.stop());
       motion.current=oldMotion;
       automationRunning.current.playing=oldPlaying;
@@ -948,7 +966,7 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><span className="ml-auto-count" title="Sliders con animación automática activada">↔ {Object.values(autoSliders).filter(Boolean).length}</span><button onClick={exportJson}>Exportar JSON</button><button disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "● Grabando…" : "◉ Exportar video"}</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
     <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span className="ml-fps-meter" title="FPS observados y tiempo promedio de renderizado por fotograma">{fpsStats.fps.toFixed(1)} FPS · {fpsStats.renderMs.toFixed(0)} ms/render</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
-    <aside className="ml-properties"><div className="ml-section ml-video-panel"><h4>EXPORTACIÓN DE VIDEO · 24 FPS</h4><p>Graba la esfera, Crystal Chamber y los sliders automatizados en WebM. Durante la exportación se utiliza un reloj de animación de 24 pasos por segundo.</p><label>Duración <select value={videoSeconds} disabled={videoExporting} onChange={e=>setVideoSeconds(Number(e.target.value))}><option value={3}>3 segundos</option><option value={5}>5 segundos</option><option value={10}>10 segundos</option><option value={15}>15 segundos</option></select></label><button className="ml-primary" disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "Grabando…" : "Exportar WebM · 24 FPS"}</button><p role="status">{videoStatus}</p></div><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
+    <aside className="ml-properties"><div className="ml-section ml-video-panel"><h4>EXPORTACIÓN DE VIDEO · 24 FPS</h4><p>Primero calcula todos los fotogramas sin grabar; después los codifica a 24 FPS. El renderizado puede tardar, pero no alarga la grabación.</p><label>Duración <select value={videoSeconds} disabled={videoExporting} onChange={e=>setVideoSeconds(Number(e.target.value))}><option value={3}>3 segundos</option><option value={5}>5 segundos</option><option value={10}>10 segundos</option><option value={15}>15 segundos</option></select></label><button className="ml-primary" disabled={videoExporting} onClick={exportVideo}>{videoExporting ? "Grabando…" : "Exportar WebM · 24 FPS"}</button><p role="status">{videoStatus}</p></div><div className="ml-section ml-automation-panel"><h4>AUTOMATIZACIÓN DE SLIDERS</h4><p>Pulsa ↔ junto a cualquier slider para animarlo. Puedes activar varios a la vez; rebotan al llegar a los extremos. El botón Pausar detiene todas las animaciones.</p><NumberSlider label="Velocidad global (rangos/seg)" value={autoSpeed} min={0.05} max={1.5} step={0.05} onChange={setAutoSpeed}/><button type="button" className="ml-auto-clear" onClick={() => {setAutoSliders({}); motion.current.clear();}}>Detener sliders seleccionados</button></div>{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
       <label><input type="checkbox" checked={surface.enabled} onChange={e=>setSurface(v=>({...v,enabled:e.target.checked}))}/> Activar geometría de lámina</label>
       {surface.enabled && <>
       <label>Deformador <select value={surface.mode} onChange={e=>setSurface(v=>({...v,mode:e.target.value as SurfaceMode}))}><option value="twist-sheet">Twist Sheet</option><option value="bessel">Membrana Bessel (aprox.)</option><option value="waves">Wave Surface</option></select></label>
