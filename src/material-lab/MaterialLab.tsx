@@ -354,6 +354,54 @@ function renderSpatial(canvas: HTMLCanvasElement, shape: Shape, u: Unified, ligh
   }
   ctx.putImageData(image, 0, 0);
 }
+// Crystal Chamber: compose the original 2D glass material with an independently
+// rasterized parametric surface. Both renderers sample the SAME spatial lights.
+type CrystalSettings = { enabled:boolean; transparency:number; innerScale:number; innerOpacity:number; lens:number; tint:number; rimBoost:number };
+const initialCrystal: CrystalSettings = { enabled:true, transparency:.68, innerScale:.78, innerOpacity:.92, lens:.16, tint:.18, rimBoost:.4 };
+function renderCrystal(canvas:HTMLCanvasElement, base:HTMLCanvasElement, sheet:HTMLCanvasElement, c:CrystalSettings) {
+  const ctx=canvas.getContext('2d',{alpha:false});
+  const bc=base.getContext('2d'); const sc=sheet.getContext('2d');
+  if(!ctx||!bc||!sc)return;
+  const n=canvas.width, original=bc.getImageData(0,0,n,n), internal=sc.getImageData(0,0,n,n);
+  const out=ctx.createImageData(n,n), dst=out.data, a=original.data, b=internal.data;
+  const center=n*.5, radius=n*.305, inv=1/radius;
+  // The surface is already rendered in screen space. Its pixels are remapped
+  // inside the orb, then refracted near the glass boundary.
+  for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+    const o=(y*n+x)*4, dx=(x-center)*inv,dy=(y-center)*inv,r=Math.hypot(dx,dy);
+    for(let k=0;k<3;k++)dst[o+k]=a[o+k];
+    dst[o+3]=255;
+    if(r>=1)continue;
+    const edge=Math.max(0,1-r*r);
+    const refraction=c.lens*(1-edge)*(.4+.6*Math.sqrt(edge));
+    const shrink=Math.max(.12,c.innerScale);
+    const ix=center+(dx*(1+refraction)*radius)/shrink;
+    const iy=center+(dy*(1+refraction)*radius)/shrink;
+    const sx=Math.round(ix),sy=Math.round(iy);
+    if(sx<0||sy<0||sx>=n||sy>=n)continue;
+    const si=(sy*n+sx)*4;
+    // The sheet renderer uses #040711 as its background. Reject background
+    // pixels without deleting low-light portions of the actual sheet.
+    const peak=Math.max(b[si]-4,b[si+1]-7,b[si+2]-17);
+    const sheetMask=Math.min(1,Math.max(0,(peak-5)/25));
+    const containment=Math.min(1,Math.max(0,(1-r)*radius/3));
+    const opacity=c.transparency*c.innerOpacity*sheetMask*containment;
+    const glassTransmission=.38+.62*Math.sqrt(edge);
+    for(let k=0;k<3;k++){
+      const inner=b[si+k]*(1-c.tint)+a[o+k]*c.tint;
+      const transmitted=inner*glassTransmission+a[o+k]*(1-glassTransmission);
+      dst[o+k]=Math.min(255,Math.round(a[o+k]*(1-opacity)+transmitted*opacity));
+    }
+    // Keep the original bright surface highlights visible over the chamber.
+    const shine=Math.min(1,Math.max(0,(Math.max(a[o],a[o+1],a[o+2])-110)/130));
+    const front=shine*(.3+.45*(1-c.transparency));
+    for(let k=0;k<3;k++)dst[o+k]=Math.round(dst[o+k]*(1-front)+a[o+k]*front);
+    // Thin glass Fresnel rim: boosts existing color, never a fixed blue ring.
+    const rim=Math.pow(Math.max(0,r),22)*c.rimBoost*containment;
+    for(let k=0;k<3;k++)dst[o+k]=Math.min(255,Math.round(dst[o+k]+a[o+k]*rim));
+  }
+  ctx.putImageData(out,0,0);
+}
 // Geometry is displaced BEFORE lighting. This is a projected height-field mesh,
 // not a texture-coordinate warp. No 3D light transport is calculated.
 type SurfaceMode = 'twist-sheet' | 'bessel' | 'waves';
@@ -650,16 +698,26 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const [selectedLight, setSelectedLight] = useState(1);
   const [twist, setTwist] = useState<TwistSettings>(initialTwist);
   const [surface, setSurface] = useState<SurfaceSettings>(initialSurface);
+  const [crystal, setCrystal] = useState<CrystalSettings>(initialCrystal);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface });
-  snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface };
+  const snapshot = useRef({ shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal });
+  snapshot.current = { shape, settings, animate, unifiedMode, unified, spatialMode, lights, twist, surface, crystal };
   useEffect(() => {
     let frame = 0, raf = 0;
+    const base=document.createElement('canvas'), sheet=document.createElement('canvas');
+    base.width=sheet.width=360; base.height=sheet.height=360;
     const tick = () => {
       const canvas = canvasRef.current;
       if (canvas) {
         const v = snapshot.current;
-        if (v.unifiedMode && v.spatialMode && v.surface.enabled) renderSurface(canvas, v.surface, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
+        if (v.unifiedMode && v.spatialMode && v.surface.enabled && v.crystal.enabled && v.shape === 'sphere') {
+          const enabled={ edge:v.settings.edge.enabled,inner:v.settings.inner.enabled,outer:v.settings.outer.enabled,surface:v.settings.surface.enabled,background:v.settings.background.enabled };
+          const time=v.animate?frame/60:0;
+          renderSpatial(base,v.shape,v.unified,v.lights,enabled,time,{...v.twist,enabled:false});
+          renderSurface(sheet,v.surface,v.unified,v.lights,enabled,time);
+          renderCrystal(canvas,base,sheet,v.crystal);
+        }
+        else if (v.unifiedMode && v.spatialMode && v.surface.enabled) renderSurface(canvas, v.surface, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
         else if (v.unifiedMode && v.spatialMode) renderSpatial(canvas, v.shape, v.unified, v.lights, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0, v.twist);
         else if (v.unifiedMode) renderUnified(canvas, v.shape, v.unified, { edge: v.settings.edge.enabled, inner: v.settings.inner.enabled, outer: v.settings.outer.enabled, surface: v.settings.surface.enabled, background: v.settings.background.enabled }, v.animate ? frame / 60 : 0);
         else render(canvas, v.shape, v.settings, v.animate ? frame / 60 : 0);
@@ -681,11 +739,11 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
     update(selected, { colors });
   };
   const exportPng = () => { const canvas = canvasRef.current; if (!canvas) return; const a = document.createElement('a'); a.download = 'shadex-material.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
-  const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, twist, surface, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
+  const exportJson = () => { const blob = new Blob([JSON.stringify({ version: 3, shape, mode: unifiedMode ? (spatialMode ? 'spatial' : 'unified') : 'legacy', unified, lights, twist, surface, crystal, effects: settings }, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shadex-material.json'; a.click(); URL.revokeObjectURL(a.href); };
   return <div className="ml-root">
     <header className="ml-header"><div className="ml-brand"><button onClick={onBack}>← Laboratorio</button><span className="ml-brandmark">◈</span><div><strong>Material Lab</strong><small>SHADEX · FIELD MATERIALS / BETA 0.1</small></div></div><div className="ml-header-actions"><button onClick={() => setUnifiedMode(v => !v)}>{unifiedMode ? '◈ Campo unificado' : '▤ Cinco efectos'}</button>{unifiedMode && <button onClick={() => setSpatialMode(v => !v)}>{spatialMode ? '◉ Luces espaciales' : '◌ Sectores anteriores'}</button>}<button onClick={() => setAnimate(v => !v)}>{animate ? 'Ⅱ Pausar' : '▷ Animar'}</button><button onClick={exportJson}>Exportar JSON</button><button className="ml-primary" onClick={exportPng}>Exportar PNG</button></div></header>
     <div className="ml-workspace"><aside className="ml-sidebar"><h3>FORMA</h3><div className="ml-shapes">{(['circle','sphere','rounded','diamond'] as Shape[]).map(s => <button key={s} className={shape === s ? 'active' : ''} onClick={() => setShape(s)}><span>{s === 'sphere' ? '◉' : s === 'circle' ? '○' : s === 'rounded' ? '▢' : '◇'}</span>{({ circle: 'Círculo 2D', sphere: 'Esfera 3D*', rounded: 'Rectángulo', diamond: 'Rombo' })[s]}</button>)}</div><h3>{unifiedMode ? 'REGIONES DERIVADAS · UNA FUENTE' : 'CAPAS / EFECTOS'}</h3><div className="ml-effects">{effects.map(item => <div key={item.id} className={`ml-effect ${selected === item.id ? 'active' : ''}`}><input aria-label={`Activar ${item.name}`} type="checkbox" checked={settings[item.id].enabled} onChange={e => update(item.id, { enabled: e.target.checked })}/><button onClick={() => setSelected(item.id)}><strong>{item.name}</strong><small>{item.subtitle}</small></button></div>)}</div><div className="ml-sidebar-note">{unifiedMode ? 'Cada región usa la misma curva maestra. Los interruptores permiten aislar su contribución para comparar.' : 'Las cinco capas usan máscaras del cuerpo. El fondo radial se limita a su antimáscara.'}</div></aside>
-    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? 'PARAMETRIC SURFACE · MESH 2.5D' : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
+    <main className="ml-stage"><div className="ml-stage-toolbar"><span>VISTA PREVIA · CANVAS 2D</span><span>{unifiedMode ? (spatialMode ? (surface.enabled ? (crystal.enabled && shape === 'sphere' ? 'CRYSTAL CHAMBER · 2.5D' : 'PARAMETRIC SURFACE · MESH 2.5D') : 'SPATIAL LIGHT FIELD · SDF') : 'UNIFIED LIGHT FIELD · SDF') : 'RGBA · MÁSCARA SDF'}</span></div><div className="ml-stage-center"><canvas ref={canvasRef} width={360} height={360}/></div><div className="ml-stage-footer"><span>{unifiedMode ? 'Una curva → cinco respuestas acopladas' : 'Fondo negro · Curvas sinusoidales por contorno'}</span><span>*Esfera: sombreado 3D aproximado</span></div></main>
     <aside className="ml-properties">{unifiedMode ? <>{spatialMode && <div className="ml-section"><h4>PARAMETRIC SURFACES · v0.7</h4>
       <label><input type="checkbox" checked={surface.enabled} onChange={e=>setSurface(v=>({...v,enabled:e.target.checked}))}/> Activar geometría de lámina</label>
       {surface.enabled && <>
@@ -698,6 +756,17 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
       <label><input type="checkbox" checked={surface.wireframe} onChange={e=>setSurface(v=>({...v,wireframe:e.target.checked}))}/> Mostrar malla</label>
       <label><input type="checkbox" checked={surface.animate} onChange={e=>setSurface(v=>({...v,animate:e.target.checked}))}/> Animar deformación</label>
       <p>Disco con altura geométrica proyectada, iluminado con las luces espaciales 2D existentes. La membrana es una aproximación visual, no una solución Bessel exacta.</p>
-      </>}</div>}{spatialMode && <div className="ml-section"><h4>TWISTED SPHERE · 2.5D</h4><label><input type="checkbox" checked={twist.enabled} onChange={e => setTwist(v => ({...v, enabled:e.target.checked}))}/> Activar torsión</label><NumberSlider label="Torsión" value={twist.amount} min={0} max={2.5} step={0.05} onChange={amount => setTwist(v => ({...v, amount}))}/><NumberSlider label="Bandas" value={twist.bands} min={1} max={8} step={1} onChange={bands => setTwist(v => ({...v, bands}))}/><NumberSlider label="Rotación / fase" value={twist.rotation} min={-3.14} max={3.14} step={0.05} onChange={rotation => setTwist(v => ({...v, rotation}))}/><NumberSlider label="Deformación silueta" value={twist.silhouette} min={0} max={0.3} step={0.01} onChange={silhouette => setTwist(v => ({...v, silhouette}))}/><label><input type="checkbox" checked={twist.attached} onChange={e => setTwist(v => ({...v, attached:e.target.checked}))}/> Luces adheridas a superficie (desmarcar = luces fijas)</label><p>Prueba 2.5D: deforma coordenadas de superficie y silueta sin malla 3D. Selecciona Esfera 3D*.</p></div>}{spatialMode && <SpatialLightsControls lights={lights} selected={selectedLight} onSelect={setSelectedLight} onChange={setLights}/>}<div className="ml-properties-title"><h3>Unified Light Field</h3><span>EXPERIMENTAL</span></div><UnifiedControls value={unified} onChange={patch => setUnified(prev => ({ ...prev, ...patch }))}/></> : <><div className="ml-properties-title"><h3>{effects.find(e => e.id === selected)?.name}</h3><span>PROPIEDADES</span></div><p>{effects.find(e => e.id === selected)?.subtitle}</p><div className="ml-section"><h4>{selected === 'edge' ? 'GRADIENTE DE CONTORNO · CÍCLICO' : 'GRADIENTE RGBA'}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${effect.colors.map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/>{selected === 'edge' && <p className="ml-contour-hint">Cinco stops RGBA distribuidos por longitud de arco. El quinto se sincroniza con el primero para cerrar el contorno sin costuras.</p>}<div className="ml-colors">{effect.colors.map((color, i) => <ColorEditor key={i} label={`Color ${i + 1} · ${i * 25}%${selected === 'edge' && i === 4 ? ' (cierre)' : ''}`} value={color} onChange={c => updateColor(i, c)}/>)}</div></div><div className="ml-section"><h4>{selected === 'surface' || selected === 'background' ? 'CAMPO RADIAL' : 'ANCHURA Y DENSIDAD'}</h4><NumberSlider label={selected === 'outer' ? 'Extensión gaussiana' : selected === 'surface' || selected === 'background' ? 'Radio' : 'Anchura'} value={effect.width} min={2} max={220} onChange={width => update(selected, { width })}/><NumberSlider label="Suavidad" value={effect.softness} min={0} max={1} step={0.01} onChange={softness => update(selected, { softness })}/>{(selected === 'surface' || selected === 'background') && <><NumberSlider label="Centro X" value={effect.centerX} min={-1.5} max={1.5} step={0.01} onChange={centerX => update(selected, { centerX })}/><NumberSlider label="Centro Y" value={effect.centerY} min={-1.5} max={1.5} step={0.01} onChange={centerY => update(selected, { centerY })}/></>}</div><div className="ml-section"><h4>MODULACIÓN SINUSOIDAL</h4><Curve effect={effect}/><NumberSlider label="Amplitud" value={effect.amplitude} min={0} max={1} step={0.01} onChange={amplitude => update(selected, { amplitude })}/><NumberSlider label="Frecuencia" value={effect.frequency} min={1} max={16} step={1} onChange={frequency => update(selected, { frequency })}/><NumberSlider label="Fase" value={effect.phase} min={0} max={6.28} step={0.01} onChange={phase => update(selected, { phase })}/></div><button className="ml-reset" onClick={() => update(selected, initial[selected])}>Restablecer efecto</button></>}</aside></div>
+      </>}</div>}{spatialMode && surface.enabled && <div className="ml-section"><h4>CRYSTAL CHAMBER · v0.9</h4>
+      <label><input type="checkbox" checked={crystal.enabled} onChange={e=>setCrystal(v=>({...v,enabled:e.target.checked}))}/> Encapsular lámina dentro de esfera</label>
+      <p>Selecciona Esfera 3D*. Conserva el vidrio 2D original, su borde y sus glows; la lámina comparte las mismas luces espaciales.</p>
+      {crystal.enabled && <>
+        <NumberSlider label="Transparencia del vidrio" value={crystal.transparency} min={0} max={1} step={.01} onChange={transparency=>setCrystal(v=>({...v,transparency}))}/>
+        <NumberSlider label="Escala interior" value={crystal.innerScale} min={.3} max={1.2} step={.01} onChange={innerScale=>setCrystal(v=>({...v,innerScale}))}/>
+        <NumberSlider label="Visibilidad de lámina" value={crystal.innerOpacity} min={0} max={1} step={.01} onChange={innerOpacity=>setCrystal(v=>({...v,innerOpacity}))}/>
+        <NumberSlider label="Distorsión de lente" value={crystal.lens} min={-.5} max={.8} step={.01} onChange={lens=>setCrystal(v=>({...v,lens}))}/>
+        <NumberSlider label="Absorción cromática" value={crystal.tint} min={0} max={1} step={.01} onChange={tint=>setCrystal(v=>({...v,tint}))}/>
+        <NumberSlider label="Realce del borde" value={crystal.rimBoost} min={0} max={1} step={.01} onChange={rimBoost=>setCrystal(v=>({...v,rimBoost}))}/>
+      </>}</div>}
+      {spatialMode && <div className="ml-section"><h4>TWISTED SPHERE · 2.5D</h4><label><input type="checkbox" checked={twist.enabled} onChange={e => setTwist(v => ({...v, enabled:e.target.checked}))}/> Activar torsión</label><NumberSlider label="Torsión" value={twist.amount} min={0} max={2.5} step={0.05} onChange={amount => setTwist(v => ({...v, amount}))}/><NumberSlider label="Bandas" value={twist.bands} min={1} max={8} step={1} onChange={bands => setTwist(v => ({...v, bands}))}/><NumberSlider label="Rotación / fase" value={twist.rotation} min={-3.14} max={3.14} step={0.05} onChange={rotation => setTwist(v => ({...v, rotation}))}/><NumberSlider label="Deformación silueta" value={twist.silhouette} min={0} max={0.3} step={0.01} onChange={silhouette => setTwist(v => ({...v, silhouette}))}/><label><input type="checkbox" checked={twist.attached} onChange={e => setTwist(v => ({...v, attached:e.target.checked}))}/> Luces adheridas a superficie (desmarcar = luces fijas)</label><p>Prueba 2.5D: deforma coordenadas de superficie y silueta sin malla 3D. Selecciona Esfera 3D*.</p></div>}{spatialMode && <SpatialLightsControls lights={lights} selected={selectedLight} onSelect={setSelectedLight} onChange={setLights}/>}<div className="ml-properties-title"><h3>Unified Light Field</h3><span>EXPERIMENTAL</span></div><UnifiedControls value={unified} onChange={patch => setUnified(prev => ({ ...prev, ...patch }))}/></> : <><div className="ml-properties-title"><h3>{effects.find(e => e.id === selected)?.name}</h3><span>PROPIEDADES</span></div><p>{effects.find(e => e.id === selected)?.subtitle}</p><div className="ml-section"><h4>{selected === 'edge' ? 'GRADIENTE DE CONTORNO · CÍCLICO' : 'GRADIENTE RGBA'}</h4><div className="ml-gradient" style={{ background: `linear-gradient(90deg, ${effect.colors.map((c,i) => `${c.hex} ${i*25}%`).join(', ')})` }}/>{selected === 'edge' && <p className="ml-contour-hint">Cinco stops RGBA distribuidos por longitud de arco. El quinto se sincroniza con el primero para cerrar el contorno sin costuras.</p>}<div className="ml-colors">{effect.colors.map((color, i) => <ColorEditor key={i} label={`Color ${i + 1} · ${i * 25}%${selected === 'edge' && i === 4 ? ' (cierre)' : ''}`} value={color} onChange={c => updateColor(i, c)}/>)}</div></div><div className="ml-section"><h4>{selected === 'surface' || selected === 'background' ? 'CAMPO RADIAL' : 'ANCHURA Y DENSIDAD'}</h4><NumberSlider label={selected === 'outer' ? 'Extensión gaussiana' : selected === 'surface' || selected === 'background' ? 'Radio' : 'Anchura'} value={effect.width} min={2} max={220} onChange={width => update(selected, { width })}/><NumberSlider label="Suavidad" value={effect.softness} min={0} max={1} step={0.01} onChange={softness => update(selected, { softness })}/>{(selected === 'surface' || selected === 'background') && <><NumberSlider label="Centro X" value={effect.centerX} min={-1.5} max={1.5} step={0.01} onChange={centerX => update(selected, { centerX })}/><NumberSlider label="Centro Y" value={effect.centerY} min={-1.5} max={1.5} step={0.01} onChange={centerY => update(selected, { centerY })}/></>}</div><div className="ml-section"><h4>MODULACIÓN SINUSOIDAL</h4><Curve effect={effect}/><NumberSlider label="Amplitud" value={effect.amplitude} min={0} max={1} step={0.01} onChange={amplitude => update(selected, { amplitude })}/><NumberSlider label="Frecuencia" value={effect.frequency} min={1} max={16} step={1} onChange={frequency => update(selected, { frequency })}/><NumberSlider label="Fase" value={effect.phase} min={0} max={6.28} step={0.01} onChange={phase => update(selected, { phase })}/></div><button className="ml-reset" onClick={() => update(selected, initial[selected])}>Restablecer efecto</button></>}</aside></div>
   </div>;
 }
