@@ -849,7 +849,15 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
   const gpuActiveRef=useRef(false);
   gpuActiveRef.current=gpuActive;
   useEffect(()=>{ animationClock.current.elapsed=0; setGpuAnimationRevision(v=>v+1); },[autoSliders,autoSpeed]);
-  const glslSource = useMemo(()=>makeShadertoyGLSL(unified, lights, { edge:settings.edge.enabled, inner:settings.inner.enabled, outer:settings.outer.enabled, surface:settings.surface.enabled, background:settings.background.enabled },animationsForShader(), {twist,surface,crystal}),[unified,lights,settings,autoSliders,autoSpeed,gpuAnimationRevision,twist,surface,crystal]);
+  // Preview uses live uniforms; export bakes the same values into standalone Shadertoy GLSL.
+  const effectsForGLSL = { edge:settings.edge.enabled, inner:settings.inner.enabled, outer:settings.outer.enabled, surface:settings.surface.enabled, background:settings.background.enabled };
+  const glslSource = useMemo(()=>makeShadertoyGLSL(unified,lights,effectsForGLSL,animationsForShader(),{twist,surface,crystal},true),[unified,lights,settings,autoSliders,autoSpeed,gpuAnimationRevision,twist,surface,crystal]);
+  const exportSource = useMemo(()=>makeShadertoyGLSL(unified,lights,effectsForGLSL,animationsForShader(),{twist,surface,crystal}),[unified,lights,settings,autoSliders,autoSpeed,gpuAnimationRevision,twist,surface,crystal]);
+  const liveUniforms = useRef<Record<string,number>>({});
+  const values:Record<string,number>={};
+  for(const [key,value] of Object.entries(unified))if(typeof value==='number')values[`u_unified_${key}`]=value;
+  for(const light of lights)for(const key of ['x','y','radius','aspect','angle','intensity'] as const)values[`u_light_${light.id}_${key}`]=light[key];
+  liveUniforms.current=values;
   useEffect(() => {
     gpuRenderer.current?.dispose();gpuRenderer.current=null;
     if (!nativeGPU || !gpuSupported || !gpuCanvasRef.current) return;
@@ -862,7 +870,7 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
       setGpuError('Exportación bloqueada: el visor actual no está ejecutando este shader GLSL. No se exportará otro material distinto. Activa la vista compatible GPU o espera a portar los efectos Canvas.');
       return;
     }
-    const blob=new Blob([glslSource],{type:'text/plain'});const url=URL.createObjectURL(blob);
+    const blob=new Blob([exportSource],{type:'text/plain'});const url=URL.createObjectURL(blob);
     const a=document.createElement('a');a.href=url;a.download='shadex-material-v15-shadertoy.glsl';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
 
@@ -899,7 +907,7 @@ export function MaterialLab({ onBack }: { onBack: () => void }) {
         if (snapshot.current.animate) animationClock.current.elapsed+=dt;
         const renderStart=performance.now();
         const canvas=canvasRef.current;
-        if (nativeGpuState.current && gpuRenderer.current) gpuRenderer.current.draw(animationClock.current.elapsed);
+        if (nativeGpuState.current && gpuRenderer.current) gpuRenderer.current.draw(animationClock.current.elapsed,liveUniforms.current);
         else if (canvas) drawScene(canvas,snapshot.current,animationClock.current.elapsed);
         sampleFrames++;
         renderSum+=performance.now()-renderStart;

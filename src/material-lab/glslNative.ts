@@ -18,10 +18,14 @@ export type GLSLTwist = {enabled:boolean;amount:number;bands:number;rotation:num
 export type GLSLSurface = {enabled:boolean;mode:'twist-sheet'|'bessel'|'waves';amplitude:number;folds:number;twist:number;tilt:number;spin:number;wireframe:boolean;animate:boolean};
 export type GLSLCrystal = {enabled:boolean;transparency:number;innerScale:number;innerOpacity:number;lens:number;tint:number;rimBoost:number};
 export type GLSLGeometry = {twist:GLSLTwist;surface:GLSLSurface;crystal:GLSLCrystal};
-export function makeShadertoyGLSL(u:GLSLMaterial,lights:GLSLLight[],effects:GLSLEffects, animations:GLSLAnimations = {}, geometry?:GLSLGeometry):string {
+export function makeShadertoyGLSL(u:GLSLMaterial,lights:GLSLLight[],effects:GLSLEffects, animations:GLSLAnimations = {}, geometry?:GLSLGeometry, runtimeUniforms=false):string {
+ const uniformIds=new Map<string,string>();
  const param=(id:string,value:number)=>{
    const a=animations[id];
-   if(!a || a.max<=a.min || a.speed<=0) return n(value);
+   if(!a || a.max<=a.min || a.speed<=0) {
+     if (runtimeUniforms) { const name=`u_${id.replace(/[^a-zA-Z0-9_]/g,"_")}`;uniformIds.set(id,name);return name; }
+     return n(value);
+   }
    const span=a.max-a.min;
    const phase=(a.start-a.min)/span;
    // Triangle wave, initialized from the slider's current position and direction.
@@ -70,7 +74,7 @@ export function makeShadertoyGLSL(u:GLSLMaterial,lights:GLSLLight[],effects:GLSL
  return `  {vec2 d=p-vec2(${x},${y});vec2 q=vec2(dot(d,vec2(${ca},${sa})),dot(d,vec2(-(${sa}),${ca})));float w=(${intensity})*exp(-2.3*${expr});sum+=w;rgb+=w*${vec3(l.color)};}`;
  }).join('\n');
  const master=`float a=6.28318530718*${param('unified:cycles',u.cycles)}*s+${param('unified:phase',u.phase)}+iTime*${param('unified:animateSpeed',u.animateSpeed)};float w=.72*cos(a)+.20*cos(2.0*a-.7)+.08*sin(3.0*a+.3);return clamp(${param('unified:ambient',u.ambient)}+(1.0-${param('unified:ambient',u.ambient)})*(.5+.5*${param('unified:amplitude',u.amplitude)}*w),0.0,1.0);`;
- return `// Shadex Material Lab v1.5.1 — spherical container / independent inner geometry\n// Paste directly into Shadertoy Image. iTime / iResolution are built-ins.\n// Generated from the same source used by the WebGL2 preview.
+ const shaderBody = `// Shadex Material Lab v1.5.1 — spherical container / independent inner geometry\n// Paste directly into Shadertoy Image. iTime / iResolution are built-ins.\n// Generated from the same source used by the WebGL2 preview.
 // Parametric surfaces use an analytic height field (not the legacy Canvas triangle rasterizer).\n${palette('surfacePalette',u.colorsSurface)}\n${palette('edgePalette',u.colorsEdge)}\n${shapeCode}
 float masterLight(float s){${master}}\nvec4 field(vec2 p){float sum=0.0;vec3 rgb=vec3(0.0);\n${lightCode}\nreturn vec4(sum>0.000001?rgb/sum:vec3(0.0),sum);}\n${sheetCode}\nvoid mainImage(out vec4 fragColor,in vec2 fragCoord){\n  vec2 p=(fragCoord-.5*iResolution.xy)/(min(iResolution.x,iResolution.y)*.305);\n  float a0=atan(p.y,p.x);
   float radius=1.0; // Independent outer sphere: never deform its silhouette
@@ -98,19 +102,25 @@ float masterLight(float s){${master}}\nvec4 field(vec2 p){float sum=0.0;vec3 rgb
     color=mix(color,sheet.rgb,sheet.a*containment*${n(cr?.innerOpacity ?? 1)});
   }` : ''}
   fragColor=vec4(clamp(color,0.0,1.0),1.0);\n}\n`;
+ const declarations=runtimeUniforms ? [...uniformIds.values()].map(name=>`uniform float ${name};`).join("\n") : "";
+ return declarations ? `${declarations}\n${shaderBody}` : shaderBody;
 }
 const VERT=`#version 300 es\nin vec2 a_position;void main(){gl_Position=vec4(a_position,0.,1.);}`;
 export class NativeGLSLRenderer {
  private gl:WebGL2RenderingContext;private program:WebGLProgram;private vao:WebGLVertexArrayObject|null;
  private time:WebGLUniformLocation|null;private resolution:WebGLUniformLocation|null;
+ private parameterLocations=new Map<string,WebGLUniformLocation|null>();
  constructor(canvas:HTMLCanvasElement,source:string){
   const gl=canvas.getContext('webgl2',{preserveDrawingBuffer:true,alpha:false});if(!gl)throw Error('WebGL2 no disponible');this.gl=gl;
   const compile=(type:number,src:string)=>{const shader=gl.createShader(type);if(!shader)throw Error('Shader no disponible');gl.shaderSource(shader,src);gl.compileShader(shader);if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(shader)||'Error GLSL');return shader;};
   const vs=compile(gl.VERTEX_SHADER,VERT),fs=compile(gl.FRAGMENT_SHADER,`#version 300 es\nprecision highp float;uniform vec3 iResolution;uniform float iTime;out vec4 outColor;\n${source}\nvoid main(){mainImage(outColor,gl_FragCoord.xy);}`);
   const program=gl.createProgram();if(!program)throw Error('Programa no disponible');gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program)||'Error al enlazar');this.program=program;
   this.time=gl.getUniformLocation(program,'iTime');this.resolution=gl.getUniformLocation(program,'iResolution');
+  const regex=/uniform float (u_[a-zA-Z0-9_]+);/g;let match:RegExpExecArray|null;
+  while((match=regex.exec(source)))this.parameterLocations.set(match[1],gl.getUniformLocation(program,match[1]));
   this.vao=gl.createVertexArray();gl.bindVertexArray(this.vao);const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);const loc=gl.getAttribLocation(program,'a_position');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);gl.bindVertexArray(null);
  }
- draw(t:number){const gl=this.gl;gl.viewport(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight);gl.useProgram(this.program);gl.uniform1f(this.time,t);gl.uniform3f(this.resolution,gl.drawingBufferWidth,gl.drawingBufferHeight,1);gl.bindVertexArray(this.vao);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);}
+ draw(t:number,params:Record<string,number>={}){const gl=this.gl;gl.viewport(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight);gl.useProgram(this.program);for(const [name,location] of this.parameterLocations){const value=params[name];if(location!==null && Number.isFinite(value))gl.uniform1f(location,value);}
+ gl.uniform1f(this.time,t);gl.uniform3f(this.resolution,gl.drawingBufferWidth,gl.drawingBufferHeight,1);gl.bindVertexArray(this.vao);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);}
  dispose(){this.gl.deleteProgram(this.program);this.gl.deleteVertexArray(this.vao);}
 }
