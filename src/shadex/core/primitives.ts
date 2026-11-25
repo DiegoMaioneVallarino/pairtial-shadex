@@ -209,6 +209,14 @@ vec2 sx_warp(vec2 p,float amt,float sc,float sp,float t){
   return p+amt*o*2.;
 }
 mat2 sx_rot(float a){ float c=cos(a),s=sin(a); return mat2(c,s,-s,c); }
+// Distort filters, in layer space: swirl (twist), bend, wave, inflate/pinch
+vec2 sx_deform(vec2 p,float t,float tw,float twr,float bend,float wv,float wf,float ws,float pinch){
+  if(tw!=0.){ float r=length(p); float k=max(0.,1.-r/max(twr,.01)); p=sx_rot(-tw*k*k)*p; }
+  if(bend!=0.) p.y-=bend*p.x*p.x;
+  if(wv!=0.) p.y+=wv*sin(p.x*wf+t*ws);
+  if(pinch!=0.){ float r=length(p); p*=pow(max(r,1e-4)/.4,clamp(pinch,-.9,.9)); }
+  return p;
+}
 vec3 sx_lin(vec3 c){ return pow(c,vec3(2.2)); }
 float sx_pp(float t){ return 1.-abs(fract(t*.5)*2.-1.); } // ping-pong 0..1..0
 vec3 sx_pal(vec3 a,vec3 b,vec3 c,float t){ t=sx_pp(t); t=t*t*(3.-2.*t); return t<.5?mix(a,b,t*2.):mix(b,c,t*2.-1.); }

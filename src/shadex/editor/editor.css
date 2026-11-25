@@ -133,7 +133,7 @@
 .sx-layer.is-active { flex-wrap: wrap; }
 .sx-layer.is-active .sx-layer__actions { width: 100%; justify-content: flex-end; padding-top: 2px; border-top: 1px solid var(--line); }
 .sx-layer__actions .sx-iconbtn:not(.sx-iconbtn--eye) { display: none; }
-.sx-layer:hover .sx-layer__actions .sx-iconbtn, .sx-layer.is-active .sx-layer__actions .sx-iconbtn { display: inline-flex; }
+.sx-layer.is-active .sx-layer__actions .sx-iconbtn { display: inline-flex; }
 .sx-layer__actions .sx-iconbtn { width: 22px; height: 24px; }
 .sx-sep { height: 1px; background: var(--line); margin: 8px 4px; }
 .sx-empty { color: var(--faint); padding: 8px; margin: 0; }
@@ -265,6 +265,28 @@
 }
 .sx-light-handle.is-active .sx-light-orbit { opacity: 1; }
 @media (pointer: coarse) { .sx-light-handle { width: 30px; height: 30px; margin: -15px 0 0 -15px; opacity: .85; } }
+
+/* ping-pong animation on sliders */
+.sx-animbtn {
+  width: 28px; height: 28px; flex: none; border-radius: 8px; border: 1px solid var(--line); background: transparent;
+  color: var(--faint); cursor: pointer; font-size: 13px; line-height: 1;
+}
+.sx-animbtn:hover { color: var(--text); border-color: var(--line-2); }
+.sx-animbtn.is-on { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.sx-field.is-animated .sx-field__label { color: #ffb0cf; }
+.sx-field.is-animated .sx-range { opacity: .9; cursor: default; }
+.sx-field.is-animated .sx-range::-webkit-slider-thumb { background: #ffb0cf; box-shadow: 0 0 10px rgba(255, 90, 160, .7); }
+.sx-range:disabled, .sx-num:disabled { opacity: 1; }
+.sx-anim { display: flex; gap: 6px; }
+.sx-anim:empty { display: none; }
+.sx-anim__box { flex: 1; display: flex; align-items: center; gap: 5px; color: var(--faint); font-size: 11px; }
+.sx-num--sm { width: 100%; height: 26px; }
+/* symbols */
+.sx-ico--symbol { color: #ffcf7a; background: rgba(255, 190, 90, .12); }
+.sx-layer.is-grouped { margin-left: 14px; border-left: 1px dashed rgba(255, 190, 90, .35); border-radius: 0 12px 12px 0; }
+.sx-members { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 2px 8px; }
+.sx-marker.is-symbol { border-color: #ffcf7a; }
+.sx-marker.is-symbol::after { background: #ffcf7a; }
 
 /* modal */
 .sx-modal {

@@ -2,7 +2,7 @@
  * Everything that leaves the editor: Shadertoy GLSL, JSON, share links and a copy-paste embed.
  * The embed is self-contained (no Shadex download): ~3 KB of runner + the compiled shader.
  */
-import type { Scene } from './ir';
+import { migrate, type Scene } from './ir';
 import { compile } from './compiler';
 import { wrapFragment } from './runtime';
 
@@ -33,8 +33,7 @@ export function validateScene(v: unknown): Scene | null {
   const s = v as Scene;
   if (!s || typeof s !== 'object' || !Array.isArray(s.layers) || !s.background || !s.finish) return null;
   if (!Array.isArray(s.background.points) || s.background.points.length !== 4) return null;
-  if (!Array.isArray(s.lights)) s.lights = []; // scenes saved before spatial lights existed
-  return s;
+  return migrate(s); // scenes saved by older versions get the new fields
 }
 
 export function toEmbed(s: Scene, opts: { scale?: number } = {}): string {

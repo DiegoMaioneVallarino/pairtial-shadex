@@ -24,6 +24,50 @@ export interface Warp {
   speed: number;
 }
 
+/** Domain deformations applied to the layer before its shape is evaluated (like Photoshop's Distort filters). */
+export interface Deform {
+  twist: number;        // radians of swirl at the centre
+  twistRadius: number;  // swirl fades to 0 at this radius
+  bend: number;         // curves the shape along a parabola
+  wave: number;         // amplitude of a sine displacement
+  waveFreq: number;
+  waveSpeed: number;
+  pinch: number;        // <0 inflate, >0 pinch
+}
+
+/** Show this layer only inside (or outside) the outline of another layer, which may be hidden. */
+export interface Mask {
+  source: string | null; // layer id
+  invert: boolean;
+  feather: number;
+}
+
+/**
+ * Symbol: a group of layers that transforms as one and can repeat itself
+ * (radially around its centre or in a row). Layers keep their own transform inside it.
+ */
+export interface Group {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  rotation: number;
+  scale: number;
+  spin: number;       // rad/s, continuous rotation
+  count: number;      // instances
+  mode: 'radial' | 'linear';
+  spacing: number;    // linear mode: distance between instances
+  scaleStep: number;  // each instance scaled by this factor
+}
+
+/** Ping-pong animation of any numeric parameter, addressed by path (e.g. "L1x.deform.twist"). */
+export interface Anim {
+  min: number;
+  max: number;
+  speed: number;  // cycles per second (min→max→min = 1 cycle at speed 0.5)
+  phase: number;  // 0..2 where the cycle starts
+}
+
 export interface Layer {
   id: string;
   name: string;
@@ -31,6 +75,9 @@ export interface Layer {
   shape: { type: ShapeType; params: Record<string, number> };
   shade: { type: ShadeType; params: Record<string, number>; palette: [Hex, Hex, Hex] };
   warp: Warp;
+  deform: Deform;
+  mask: Mask;
+  group: string | null;
   transform: Transform;
   blend: BlendMode;
   opacity: number;
@@ -88,12 +135,32 @@ export interface Scene {
   radius: number;     // corner radius in CSS px for previews and embeds
   background: Background;
   lights: Light[];
+  groups: Group[];
   layers: Layer[];
+  anims: Record<string, Anim>;
   finish: Finish;
 }
 
 export const MAX_INSTANCES = 8;
 export const MAX_LIGHTS = 8;
+export const MAX_REPEAT = 12;
+
+export const defaultDeform = (): Deform => ({ twist: 0, twistRadius: 0.5, bend: 0, wave: 0, waveFreq: 6, waveSpeed: 1, pinch: 0 });
+export const defaultMask = (): Mask => ({ source: null, invert: false, feather: 0 });
+
+/** Bring scenes saved by older versions up to date (adds missing fields, never removes). */
+export function migrate(s: Scene): Scene {
+  s.lights ??= [];
+  s.groups ??= [];
+  s.anims ??= {};
+  for (const l of s.layers) {
+    l.deform = { ...defaultDeform(), ...l.deform };
+    l.mask = { ...defaultMask(), ...l.mask };
+    if (l.group === undefined) l.group = null;
+    if (l.group && !s.groups.some(g => g.id === l.group)) l.group = null;
+  }
+  return s;
+}
 
 export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 

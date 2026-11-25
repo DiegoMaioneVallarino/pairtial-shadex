@@ -34,6 +34,13 @@ Las luces (`scene.lights`) viven en la escena, no dentro de una capa. Una forma 
 
 Toda forma devuelve `sd` (distancia con signo) y `g` (dirección hacia fuera del contorno) en su `Hit`.
 
+## Máscaras, símbolos, animación y deformaciones
+
+- **Máscara** (`layer.mask`): la capa solo se ve dentro (o fuera) del contorno de otra capa, que puede estar oculta. Tiene suavizado de borde.
+- **Símbolo** (`scene.groups`, `layer.group`): agrupa capas que se mueven, giran y escalan juntas. Se puede repetir hasta 12 veces, en círculo o en fila, con escala por copia y giro continuo. Se dibuja en la posición de su capa más baja de la pila.
+- **Animación de ida y vuelta** (`scene.anims`): cualquier parámetro numérico, direccionado por ruta (`<id>.shape.width`, `<id>.deform.twist`, `<id-luz>.x`, `finish.exposure`…), va de `min` a `max` y regresa a `speed` ciclos por segundo. En el editor es el botón ↔ junto a cada slider.
+- **Deformaciones** (`layer.deform`): remolino con radio, curvar, ondular (amplitud, frecuencia y velocidad) e inflar/pellizcar. Se aplican al espacio de la capa antes de evaluar la forma.
+
 ## Añadir una forma o un material
 
 1. En `primitives.ts`, añade la entrada a `SHAPES` (o `SHADES`) con sus parámetros: etiqueta, rango, valor por defecto y rango seguro para «Aleatorio».
