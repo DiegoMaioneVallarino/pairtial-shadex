@@ -12,7 +12,7 @@ shadex/
     compiler.ts    escena → GLSL (uniforms para el editor, constantes para exportar)
     runtime.ts     renderer WebGL2: recompila solo si cambia la estructura
     export.ts      Shadertoy, JSON, enlace compartible y snippet para insertar
-    presets.ts     Esfera de luz, Emblema biselado, Silvana, Hyprant, Paix, Pairtial, Glass, Lazo
+    presets.ts     Fusión líquida, Flor de luz, Esfera de luz, Emblema biselado, Silvana, Hyprant, Paix, Pairtial, Glass, Lazo
   editor/
     editor.ts            editor sin framework
     editor.css
@@ -39,6 +39,10 @@ Toda forma devuelve `sd` (distancia con signo) y `g` (dirección hacia fuera del
 - **Máscara** (`layer.mask`): la capa solo se ve dentro (o fuera) del contorno de otra capa, que puede estar oculta. Tiene suavizado de borde.
 - **Símbolo** (`scene.groups`, `layer.group`): agrupa capas que se mueven, giran y escalan juntas. Se puede repetir hasta 12 veces, en círculo o en fila, con escala por copia y giro continuo. Se dibuja en la posición de su capa más baja de la pila.
 - **Animación de ida y vuelta** (`scene.anims`): cualquier parámetro numérico, direccionado por ruta (`<id>.shape.width`, `<id>.deform.twist`, `<id-luz>.x`, `finish.exposure`…), va de `min` a `max` y regresa a `speed` ciclos por segundo. En el editor es el botón ↔ junto a cada slider.
+- **Curvas de suavizado** (`anim.ease`, `anim.hold`): cada tramo mín→máx y máx→mín puede ser lineal, suave, Apple (lento–rápido–lento), resorte (rebasa y se asienta) o rebote, con pausa en los extremos.
+- **Transformación** (`layer.morph`): el contorno se mezcla con el de otra forma según `amount`; anímalo con ↔ para que una forma se convierta en otra y regrese.
+- **Fusión** (`layer.fusion`): las copias de una forma repetida se funden como líquido (unión suave), y una capa puede fundirse con el contorno de otra (oculta la otra para ver una sola forma).
+- **Luz de barrido** (`light.kind = 'sweep'`): un destello que cruza la escena con curva Apple, aparece y se desvanece, y espera. Las luces de escena brillan también sobre seda y vidrio.
 - **Deformaciones** (`layer.deform`): remolino con radio, curvar, ondular (amplitud, frecuencia y velocidad) e inflar/pellizcar. Se aplican al espacio de la capa antes de evaluar la forma.
 
 ## Añadir una forma o un material

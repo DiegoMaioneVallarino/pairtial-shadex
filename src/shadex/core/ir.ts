@@ -60,12 +60,31 @@ export interface Group {
   scaleStep: number;  // each instance scaled by this factor
 }
 
+export type Ease = 'linear' | 'smooth' | 'apple' | 'spring' | 'bounce';
+export const EASES: Ease[] = ['linear', 'smooth', 'apple', 'spring', 'bounce'];
+
 /** Ping-pong animation of any numeric parameter, addressed by path (e.g. "L1x.deform.twist"). */
 export interface Anim {
   min: number;
   max: number;
   speed: number;  // cycles per second (min→max→min = 1 cycle at speed 0.5)
   phase: number;  // 0..2 where the cycle starts
+  ease: Ease;     // curve of each min→max and max→min stretch
+  hold: number;   // 0..0.9 share of each stretch spent resting at the ends
+}
+
+/** Turn this layer's outline into another shape: the distance fields are blended by `amount`. */
+export interface Morph {
+  to: ShapeType | null;
+  params: Record<string, number>;
+  amount: number;
+}
+
+/** Liquid merging: smooth union of the layer's copies and/or with another layer's outline. */
+export interface Fusion {
+  copies: boolean;       // instanced shapes: copies melt into one surface
+  with: string | null;   // layer id whose outline merges into this one (hide it to see one shape)
+  smooth: number;        // blend radius, scene units
 }
 
 export interface Layer {
@@ -76,6 +95,8 @@ export interface Layer {
   shade: { type: ShadeType; params: Record<string, number>; palette: [Hex, Hex, Hex] };
   warp: Warp;
   deform: Deform;
+  morph: Morph;
+  fusion: Fusion;
   mask: Mask;
   group: string | null;
   transform: Transform;
@@ -104,16 +125,16 @@ export interface Light {
   id: string;
   name: string;
   enabled: boolean;
-  kind: 'radial' | 'linear';
+  kind: 'radial' | 'linear' | 'sweep'; // sweep: a band that crosses the scene once per cycle, then waits
   x: number;
   y: number;
   radius: number;    // reach of the light field
-  aspect: number;    // radial: ellipse ratio
+  aspect: number;    // radial: ellipse ratio · sweep: fraction of the cycle spent waiting
   rotation: number;  // radians
   intensity: number;
   color: Hex;
   height: number;    // elevation for bevel shading: low = grazing light, long shadows
-  orbit: number;     // radius of the path the light travels (0 = still)
+  orbit: number;     // radius of the path the light travels (0 = still) · sweep: half the distance it crosses
   speed: number;
   phase: number;
 }
@@ -147,6 +168,8 @@ export const MAX_REPEAT = 12;
 
 export const defaultDeform = (): Deform => ({ twist: 0, twistRadius: 0.5, bend: 0, wave: 0, waveFreq: 6, waveSpeed: 1, pinch: 0 });
 export const defaultMask = (): Mask => ({ source: null, invert: false, feather: 0 });
+export const defaultMorph = (): Morph => ({ to: null, params: {}, amount: 0 });
+export const defaultFusion = (): Fusion => ({ copies: false, with: null, smooth: 0.08 });
 
 /** Bring scenes saved by older versions up to date (adds missing fields, never removes). */
 export function migrate(s: Scene): Scene {
@@ -156,9 +179,12 @@ export function migrate(s: Scene): Scene {
   for (const l of s.layers) {
     l.deform = { ...defaultDeform(), ...l.deform };
     l.mask = { ...defaultMask(), ...l.mask };
+    l.morph = { ...defaultMorph(), ...l.morph };
+    l.fusion = { ...defaultFusion(), ...l.fusion };
     if (l.group === undefined) l.group = null;
     if (l.group && !s.groups.some(g => g.id === l.group)) l.group = null;
   }
+  for (const a of Object.values(s.anims)) { a.ease ??= 'linear'; a.hold ??= 0; } // v0.3 anims were linear
   return s;
 }
 

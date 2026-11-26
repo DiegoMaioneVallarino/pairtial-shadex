@@ -99,7 +99,7 @@
 /* body layout */
 .sx-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 264px 1fr 316px; }
 .sx-panel { min-height: 0; overflow-y: auto; padding: 14px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent; }
-.sx-panel--left { border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.sx-panel--left { border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; overflow-x: hidden; }
 .sx-panel--right { border-left: 1px solid var(--line); }
 .sx-panel__title { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); padding: 2px 4px; }
 
@@ -243,8 +243,8 @@
 
 /* spatial lights */
 .sx-ico--light { color: var(--c, #fff); background: color-mix(in srgb, var(--c, #fff) 16%, transparent); }
-.sx-panel__title--row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.sx-row-btns { display: flex; gap: 4px; letter-spacing: 0; text-transform: none; }
+.sx-panel__title--row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.sx-row-btns { display: flex; flex-wrap: wrap; gap: 4px; letter-spacing: 0; text-transform: none; }
 .sx-row-btns .sx-chip { height: 24px; padding: 0 8px; font-size: 11.5px; }
 .sx-subhead {
   margin: 12px 2px 2px; padding-top: 10px; border-top: 1px dashed var(--line);
@@ -277,7 +277,10 @@
 .sx-field.is-animated .sx-range { opacity: .9; cursor: default; }
 .sx-field.is-animated .sx-range::-webkit-slider-thumb { background: #ffb0cf; box-shadow: 0 0 10px rgba(255, 90, 160, .7); }
 .sx-range:disabled, .sx-num:disabled { opacity: 1; }
-.sx-anim { display: flex; gap: 6px; }
+.sx-anim { display: flex; flex-direction: column; gap: 6px; }
+.sx-anim__line { display: flex; gap: 6px; }
+.sx-anim__box--wide { flex: 2.2; }
+.sx-select--sm { height: 26px; width: 100%; font-size: 11.5px; padding: 0 22px 0 7px; background-position: right 5px center; background-size: 12px; }
 .sx-anim:empty { display: none; }
 .sx-anim__box { flex: 1; display: flex; align-items: center; gap: 5px; color: var(--faint); font-size: 11px; }
 .sx-num--sm { width: 100%; height: 26px; }

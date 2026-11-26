@@ -1,8 +1,10 @@
-import { newId, defaultDeform, defaultMask, type Deform, type Mask, type Group, type Scene, type Layer, type Light, type ShapeType, type ShadeType, type Hex, type MeshPoint, type Finish } from './ir';
+import { newId, defaultDeform, defaultMask, defaultMorph, defaultFusion, type Deform, type Mask, type Morph, type Fusion, type Group, type Scene, type Layer, type Light, type ShapeType, type ShadeType, type Hex, type MeshPoint, type Finish } from './ir';
 import { SHAPES, SHADES, defaults } from './primitives';
 
-type LayerInit = Partial<Omit<Layer, 'shape' | 'shade' | 'deform' | 'mask'>> & {
+type LayerInit = Partial<Omit<Layer, 'shape' | 'shade' | 'deform' | 'mask' | 'morph' | 'fusion'>> & {
   deform?: Partial<Deform>;
+  morph?: Partial<Morph>;
+  fusion?: Partial<Fusion>;
   mask?: Partial<Mask>;
   shape?: Record<string, number>;
   shade?: Record<string, number>;
@@ -19,6 +21,8 @@ export function makeLayer(shape: ShapeType, shade: ShadeType, o: LayerInit = {})
     warp: o.warp ?? { amount: 0.04, scale: 1.5, speed: 0.15 },
     deform: { ...defaultDeform(), ...o.deform },
     mask: { ...defaultMask(), ...o.mask },
+    morph: { ...defaultMorph(), ...o.morph },
+    fusion: { ...defaultFusion(), ...o.fusion },
     group: o.group ?? null,
     transform: { x: 0, y: 0, rotation: 0, scale: 1, blur: 0, ...o.transform },
     blend: o.blend ?? (shade === 'glow' ? 'add' : 'normal'),
@@ -47,6 +51,38 @@ const scene = (name: string, aspect: number, bg: Scene['background'], layers: La
   ({ shadex: '0.1', name, speed, aspect, radius: 22, background: bg, lights, groups: [], layers, anims: {}, finish: finish(f) });
 
 export const PRESETS: Record<string, () => Scene> = {
+  liquido: () => {
+    const lit = (o: Record<string, number>) => ({ surface: 1.25, ambient: 0.2, bevel: 0.02, depth: 1.2, volume: 0.6, texture: 0, texScale: 18, specular: 1.2, gloss: 64,
+      edge: 1, edgeWidth: 0.008, bands: 0, emission: 0.85, inner: 0.08, outer: 0.06, bounce: 0.5, shadow: 0.3, shadowDist: 0.03, flow: 0, opacity: 1, ...o });
+    const drops = makeLayer('orb', 'lit', {
+      name: 'Gotas', palette: ['#0a0c2a', '#5a6bff', '#eef1ff'],
+      shape: { count: 4, radius: 0.13, spacing: 0.2, falloff: 0.9, float: 0.04, speed: 0.6 },
+      shade: lit({ volume: 0, bevel: 0 }), fusion: { copies: true, smooth: 0.11 },
+      transform: { x: -0.32, y: 0, rotation: 0.15, scale: 1, blur: 0 }, warp: { amount: 0, scale: 1, speed: 0 },
+    });
+    const morph = makeLayer('polygon', 'lit', {
+      name: 'Triángulo → círculo', palette: ['#2a0a24', '#ff4f9a', '#ffe0ee'],
+      shape: { sides: 3, radius: 0.2, roundness: 0.03 },
+      shade: lit({ bevel: 0.035, depth: 1.8, volume: 0.3, texture: 0.15, texScale: 30 }),
+      morph: { to: 'circle', params: { radius: 0.17 }, amount: 0 },
+      transform: { x: 0.45, y: 0.02, rotation: 0, scale: 1, blur: 0 }, warp: { amount: 0, scale: 1, speed: 0 },
+    });
+    const sc = scene('Fusión líquida', 1.6, {
+      base: '#04040d', drift: 0.08,
+      points: [pt(-0.3, 0.3, 0.5, '#121a4a'), pt(0.45, -0.25, 0.45, '#2a0b2a'), off, off],
+    }, [drops, morph], { tonemap: 0.85, vignette: 0.28, grain: 0.18 }, 1, [
+      makeLight({ name: 'Principal', x: -0.35, y: 0.38, radius: 0.55, intensity: 1.3, color: '#dfe8ff', height: 0.35, orbit: 0.12, speed: 0.3 }),
+      makeLight({ name: 'Magenta', x: 0.5, y: -0.32, radius: 0.4, intensity: 0.9, color: '#ff4fa8', height: 0.25, orbit: 0.12, speed: -0.35, phase: 2 }),
+      makeLight({ name: 'Barrido', kind: 'sweep', x: 0, y: 0, radius: 0.045, rotation: -0.55, intensity: 1.7, color: '#ffffff', height: 0.5, orbit: 0.95, speed: 0.2, aspect: 0.5, phase: 0 }),
+    ]);
+    sc.anims = {
+      [`${drops.id}.shape.spacing`]: { min: 0.1, max: 0.3, speed: 0.22, phase: 0, ease: 'spring', hold: 0.25 },
+      [`${morph.id}.morph.amount`]: { min: 0, max: 1, speed: 0.2, phase: 0, ease: 'apple', hold: 0.35 },
+      [`${morph.id}.transform.rotation`]: { min: -0.4, max: 0.4, speed: 0.1, phase: 0.5, ease: 'smooth', hold: 0 },
+    };
+    return sc;
+  },
+
   flor: () => {
     const g = makeGroup({ name: 'Pétalos', count: 8, mode: 'radial', spin: 0.12 });
     const maskSrc = makeLayer('circle', 'solid', { name: 'Máscara (círculo)', visible: false, shape: { radius: 0.44 }, warp: { amount: 0, scale: 1, speed: 0 } });
@@ -80,8 +116,8 @@ export const PRESETS: Record<string, () => Scene> = {
     ]);
     sc.groups = [g];
     sc.anims = {
-      [`${ribbon.id}.deform.twist`]: { min: -2.2, max: 2.2, speed: 0.12, phase: 0.85 },
-      [`${petal.id}.shape.width`]: { min: 0.14, max: 0.26, speed: 0.25, phase: 0 },
+      [`${ribbon.id}.deform.twist`]: { min: -2.2, max: 2.2, speed: 0.12, phase: 0.85, ease: 'apple', hold: 0.15 },
+      [`${petal.id}.shape.width`]: { min: 0.14, max: 0.26, speed: 0.25, phase: 0, ease: 'spring', hold: 0.2 },
     };
     return sc;
   },
@@ -245,6 +281,6 @@ export const PRESETS: Record<string, () => Scene> = {
 };
 
 export const PRESET_LABELS: Record<string, string> = {
-  flor: 'Flor de luz (símbolo, máscara, animación)', materiallab: 'Esfera de luz (Material Lab)', bisel: 'Emblema biselado',
+  liquido: 'Fusión líquida (fusión, transformación, barrido)', flor: 'Flor de luz (símbolo, máscara, animación)', materiallab: 'Esfera de luz (Material Lab)', bisel: 'Emblema biselado',
   silvana: 'Silvana', hyprant: 'Hyprant OS', paix: 'Paix Studio', pairtial: 'Pairtial', glass: 'Glass', lazo: 'Lazo iridiscente (2D)', blank: 'Vacía',
 };

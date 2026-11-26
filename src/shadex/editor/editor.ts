@@ -2,7 +2,7 @@
  * Shadex Editor — framework-free so it can be mounted anywhere (React wrapper, plain page).
  * The editor only ever touches the IR; the renderer reads the IR every frame.
  */
-import { clone, newId, MAX_LIGHTS, MAX_REPEAT, type Scene, type Layer, type Light, type Group, type ShapeType, type ShadeType, type BlendMode, type Hex } from '../core/ir';
+import { clone, newId, MAX_LIGHTS, MAX_REPEAT, type Ease, type Scene, type Layer, type Light, type Group, type ShapeType, type ShadeType, type BlendMode, type Hex } from '../core/ir';
 import { SHAPES, SHADES, defaults, type ParamDef } from '../core/primitives';
 import { PRESETS, PRESET_LABELS, makeLayer, makeLight, makeGroup } from '../core/presets';
 import { ShadexRenderer } from '../core/runtime';
@@ -13,7 +13,7 @@ type Sel = { kind: 'layer'; id: string } | { kind: 'light'; id: string } | { kin
 type Attrs = Record<string, unknown> & { class?: string; style?: string };
 type Binding = { input: HTMLInputElement; num: HTMLInputElement; get: () => number; path?: string; fmt: (v: number) => string; paint: (v: number) => void };
 
-const STORE_KEY = 'shadex:scene:v0.3';
+const STORE_KEY = 'shadex:scene:v0.4';
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = {}, ...kids: (Node | string | null | false | undefined)[]): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
@@ -55,11 +55,13 @@ const ICON = {
   polygon: '<svg viewBox="0 0 24 24"><path d="M12 3l8 9-8 9-8-9z"/></svg>',
   light: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
   symbol: '<svg viewBox="0 0 24 24"><path d="M12 3l3 6 6 .8-4.5 4.2 1.1 6L12 17l-5.6 3 1.1-6L3 9.8 9 9z"/></svg>',
+  sweep: '<svg viewBox="0 0 24 24"><path d="M4 20L20 4"/><path d="M2 13l7-7M11 22l7-7" opacity=".4"/><path d="M15 3l1 2.5L18.5 6.5 16 7.5 15 10 14 7.5 11.5 6.5 14 5.5z"/></svg>',
   linear: '<svg viewBox="0 0 24 24"><path d="M3 17L21 7"/><path d="M3 12L15 5.5M9 18.5 21 12" opacity=".45"/></svg>',
   particles: '<svg viewBox="0 0 24 24"><circle cx="5" cy="6" r="1.4"/><circle cx="12" cy="4" r="1"/><circle cx="18" cy="9" r="1.6"/><circle cx="8" cy="14" r="1.1"/><circle cx="15" cy="17" r="1.3"/><circle cx="20" cy="20" r="1"/><circle cx="4" cy="20" r="1.2"/></svg>',
 };
 const icon = (k: keyof typeof ICON, cls = '') => { const s = h('span', { class: `sx-ico ${cls}` }); s.innerHTML = ICON[k]; return s; };
 
+const EASE_LABELS: [Ease, string][] = [['apple', 'Apple (lento–rápido–lento)'], ['smooth', 'Suave'], ['spring', 'Resorte (rebasa y se asienta)'], ['bounce', 'Rebote'], ['linear', 'Lineal']];
 const BLENDS: [BlendMode, string][] = [['normal', 'Normal'], ['add', 'Sumar luz'], ['screen', 'Trama'], ['multiply', 'Multiplicar']];
 const ASPECTS: [number, string][] = [[1.9, 'Tarjeta ancha'], [1.35, 'Tarjeta alta'], [16 / 9, 'Hero 16:9'], [1.6, 'Panorámica'], [1, 'Cuadrado'], [9 / 16, 'Móvil 9:16']];
 
@@ -161,7 +163,7 @@ export class ShadexEditor {
       const saved = localStorage.getItem(STORE_KEY);
       if (saved) { const s = validateScene(JSON.parse(saved)); if (s) return s; }
     } catch { /* storage unavailable */ }
-    return PRESETS.flor();
+    return PRESETS.liquido();
   }
 
   private record() {
@@ -352,7 +354,7 @@ export class ShadexEditor {
         title: `${li.name} · arrastra para moverla`,
         style: `left:${W / 2 + li.x * H}px;top:${H / 2 - li.y * H}px;--c:${li.color}`,
       });
-      if (li.orbit > 0.001) dot.append(h('span', { class: 'sx-light-orbit', style: `width:${li.orbit * 2 * H}px;height:${li.orbit * 1.5 * H}px` }));
+      if (li.orbit > 0.001 && li.kind !== 'sweep') dot.append(h('span', { class: 'sx-light-orbit', style: `width:${li.orbit * 2 * H}px;height:${li.orbit * 1.5 * H}px` }));
       dot.addEventListener('pointerdown', e => {
         e.stopPropagation();
         if (!active) { this.sel = { kind: 'light', id: li.id }; this.renderLayers(); this.renderInspector(); }
@@ -483,11 +485,13 @@ export class ShadexEditor {
     if (this.scene.lights.length >= MAX_LIGHTS) { this.toast(`Máximo ${MAX_LIGHTS} luces`); return; }
     this.record();
     const hue = Math.random() * 360;
-    const li = makeLight({
-      name: kind === 'linear' ? 'Franja de luz' : `Luz ${this.scene.lights.length + 1}`, kind,
-      x: +rand(-0.4, 0.4).toFixed(2), y: +rand(-0.3, 0.3).toFixed(2), color: hsl(hue, 0.9, 0.7),
-      radius: kind === 'linear' ? 0.06 : 0.4, rotation: kind === 'linear' ? 0.8 : 0, phase: +rand(0, 6).toFixed(2),
-    });
+    const li = kind === 'sweep'
+      ? makeLight({ name: 'Barrido', kind, x: 0, y: 0, color: '#ffffff', radius: 0.05, rotation: -0.6, intensity: 1.6, height: 0.5, orbit: 0.9, speed: 0.22, aspect: 0.55, phase: 0 })
+      : makeLight({
+        name: kind === 'linear' ? 'Franja de luz' : `Luz ${this.scene.lights.length + 1}`, kind,
+        x: +rand(-0.4, 0.4).toFixed(2), y: +rand(-0.3, 0.3).toFixed(2), color: hsl(hue, 0.9, 0.7),
+        radius: kind === 'linear' ? 0.06 : 0.4, rotation: kind === 'linear' ? 0.8 : 0, phase: +rand(0, 6).toFixed(2),
+      });
     this.scene.lights.push(li);
     this.sel = { kind: 'light', id: li.id };
     this.renderLayers(); this.renderInspector(); this.updateMarker(); this.changed();
@@ -588,7 +592,7 @@ export class ShadexEditor {
         onclick: (e: Event) => { e.stopPropagation(); this.record(); l.visible = !l.visible; this.renderLayers(); this.changed(); },
       }, icon(l.visible ? 'eye' : 'eyeOff'));
       const gName = l.group ? this.scene.groups.find(g => g.id === l.group)?.name : undefined;
-      const tags = [gName ? `◇ ${gName}` : '', l.mask.source ? '◐ máscara' : '', Object.keys(this.scene.anims).some(k => k.startsWith(`${l.id}.`)) ? '↔ animada' : ''].filter(Boolean);
+      const tags = [gName ? `◇ ${gName}` : '', l.mask.source ? '◐ máscara' : '', l.morph.to ? `→ ${SHAPES[l.morph.to].label.toLowerCase()}` : '', (l.fusion.copies || l.fusion.with) ? '≈ fusión' : '', Object.keys(this.scene.anims).some(k => k.startsWith(`${l.id}.`)) ? '↔ animada' : ''].filter(Boolean);
       const r = row({ kind: 'layer', id: l.id }, icon(l.shape.type as keyof typeof ICON, 'sx-ico--shape'), l.name,
         tags.length ? tags.join(' · ') : `${SHAPES[l.shape.type].label} · ${SHADES[l.shade.type].label}`,
         h('div', { class: 'sx-layer__actions' },
@@ -610,10 +614,10 @@ export class ShadexEditor {
         class: 'sx-iconbtn sx-iconbtn--eye', title: li.enabled ? 'Apagar' : 'Encender',
         onclick: (e: Event) => { e.stopPropagation(); this.record(); li.enabled = !li.enabled; this.renderLayers(); this.updateMarker(); this.changed(); },
       }, icon(li.enabled ? 'eye' : 'eyeOff'));
-      const ico = icon(li.kind === 'linear' ? 'linear' : 'light', 'sx-ico--shape sx-ico--light');
+      const ico = icon(li.kind === 'radial' ? 'light' : li.kind === 'sweep' ? 'sweep' : 'linear', 'sx-ico--shape sx-ico--light');
       ico.style.setProperty('--c', li.color);
       return row({ kind: 'light', id: li.id }, ico, li.name,
-        `${li.kind === 'linear' ? 'Franja' : 'Radial'}${li.orbit > 0.001 ? ' · en órbita' : ''}`,
+        li.kind === 'sweep' ? 'Barrido' : `${li.kind === 'linear' ? 'Franja' : 'Radial'}${li.orbit > 0.001 ? ' · en órbita' : ''}`,
         h('div', { class: 'sx-layer__actions' },
           act('copy', 'Duplicar', () => this.duplicateLight(li.id)),
           act('trash', 'Eliminar', () => this.removeLight(li.id)), vis), !li.enabled);
@@ -631,7 +635,8 @@ export class ShadexEditor {
       h('div', { class: 'sx-panel__title sx-panel__title--row' }, h('span', {}, 'Luces espaciales'),
         h('span', { class: 'sx-row-btns' },
           h('button', { class: 'sx-chip', title: 'Luz radial', onclick: () => this.addLight('radial') }, icon('plus'), 'Radial'),
-          h('button', { class: 'sx-chip', title: 'Franja de luz', onclick: () => this.addLight('linear') }, icon('plus'), 'Franja'))),
+          h('button', { class: 'sx-chip', title: 'Franja de luz', onclick: () => this.addLight('linear') }, icon('plus'), 'Franja'),
+          h('button', { class: 'sx-chip', title: 'Barrido: destello que cruza la escena y espera', onclick: () => this.addLight('sweep') }, icon('plus'), 'Barrido'))),
       ...lightRows,
       ...(lightRows.length ? [] : [h('p', { class: 'sx-empty' }, 'Sin luces. Las formas con material “Luz espacial” las necesitan para cobrar volumen.')]),
       h('div', { class: 'sx-sep' }),
@@ -700,7 +705,15 @@ export class ShadexEditor {
         });
         return h('label', { class: 'sx-anim__box' }, h('span', {}, lbl), n);
       };
-      animRow.replaceChildren(box('Mín', 'min', def.step), box('Máx', 'max', def.step), box('Vel', 'speed', 0.01));
+      const easeSel = h('select', { class: 'sx-select sx-select--sm', title: 'Curva de movimiento' },
+        ...EASE_LABELS.map(([v, l]) => h('option', { value: v }, l))) as HTMLSelectElement;
+      easeSel.value = a.ease ?? 'linear';
+      easeSel.addEventListener('change', () => { this.record(); a.ease = easeSel.value as Ease; this.changed(); });
+      const hold = h('input', { type: 'number', min: '0', max: '0.9', step: '0.05', value: String(a.hold ?? 0), class: 'sx-num sx-num--sm', title: 'Pausa en cada extremo (0–0.9)' }) as HTMLInputElement;
+      hold.addEventListener('change', () => { const v = parseFloat(hold.value); if (!Number.isFinite(v)) return; this.record(); a.hold = Math.min(0.9, Math.max(0, v)); this.changed(); });
+      animRow.replaceChildren(
+        h('div', { class: 'sx-anim__line' }, box('Mín', 'min', def.step), box('Máx', 'max', def.step), box('Vel', 'speed', 0.01)),
+        h('div', { class: 'sx-anim__line' }, h('label', { class: 'sx-anim__box sx-anim__box--wide' }, h('span', {}, 'Curva'), easeSel), h('label', { class: 'sx-anim__box' }, h('span', {}, 'Pausa'), hold)));
     };
     animBtn.addEventListener('click', () => {
       this.record();
@@ -709,7 +722,7 @@ export class ShadexEditor {
       } else {
         const v = get(), span = (def.max - def.min) * 0.25;
         const min = +Math.max(def.min, v - span).toFixed(4), max = +Math.min(def.max, v + span).toFixed(4);
-        this.scene.anims[path] = { min, max, speed: 0.25, phase: max > min ? (v - min) / (max - min) : 0 };
+        this.scene.anims[path] = { min, max, speed: 0.25, phase: max > min ? (v - min) / (max - min) : 0, ease: 'apple', hold: 0.15 };
       }
       renderAnim();
       this.changed();
@@ -800,6 +813,23 @@ export class ShadexEditor {
         this.slider({ label: 'Intensidad del ruido', min: 0, max: 0.5, step: 0.005, default: 0.04 }, () => l.warp.amount, v => { l.warp.amount = v; }, `${l.id}.warp.amount`),
         this.slider({ label: 'Escala del ruido', min: 0.2, max: 8, step: 0.05, default: 1.5 }, () => l.warp.scale, v => { l.warp.scale = v; }, `${l.id}.warp.scale`),
         this.slider({ label: 'Velocidad', min: 0, max: 2, step: 0.01, default: 0.15 }, () => l.warp.speed, v => { l.warp.speed = v; }, `${l.id}.warp.speed`)),
+      this.section('Fusión y transformación', !!(l.morph.to || l.fusion.copies || l.fusion.with), null,
+        h('p', { class: 'sx-hintline' }, 'Transforma el contorno en otra forma o fúndelo con otras como un líquido. Activa ↔ en “Mezcla” o “Suavidad” para animarlo.'),
+        this.select<string>('Transformar en', [['', 'No transformar'], ...(Object.keys(SHAPES) as ShapeType[]).map(k => [k, SHAPES[k].label] as [string, string])],
+          () => l.morph.to ?? '', v => {
+            const to = (v || null) as ShapeType | null;
+            l.morph = { to, params: to ? defaults(SHAPES[to].params) : {}, amount: to ? (l.morph.amount || 0.5) : 0 };
+            this.renderInspector();
+          }),
+        l.morph.to ? this.slider({ label: `Mezcla (${SHAPES[l.shape.type].label} → ${SHAPES[l.morph.to].label})`, min: 0, max: 1, step: 0.01, default: 0.5 }, () => l.morph.amount, v => { l.morph.amount = v; }, `${l.id}.morph.amount`) : null,
+        ...(l.morph.to ? SHAPES[l.morph.to].params.map(d => this.slider({ ...d, label: `Destino · ${d.label}` }, () => l.morph.params[d.key] ?? d.default, v => { l.morph.params[d.key] = d.int ? Math.round(v) : v; }, `${l.id}.morph.${d.key}`)) : []),
+        SHAPES[l.shape.type].instanced
+          ? this.select<string>('Copias', [['sep', 'Separadas'], ['fuse', 'Fundidas como líquido']], () => l.fusion.copies ? 'fuse' : 'sep', v => { l.fusion.copies = v === 'fuse'; this.renderLayers(); })
+          : null,
+        this.select<string>('Fusionar con', [['', 'Ninguna capa'], ...this.scene.layers.filter(o => o.id !== l.id).map(o => [o.id, `${o.name}${o.visible ? '' : ' (oculta)'}`] as [string, string])],
+          () => l.fusion.with ?? '', v => { l.fusion.with = v || null; this.renderLayers(); this.renderInspector(); }),
+        (l.fusion.copies || l.fusion.with) ? this.slider({ label: 'Suavidad de la fusión', min: 0, max: 0.4, step: 0.002, default: 0.08 }, () => l.fusion.smooth, v => { l.fusion.smooth = v; }, `${l.id}.fusion.smooth`) : null,
+        l.fusion.with ? h('p', { class: 'sx-hintline' }, 'Oculta la otra capa para ver una sola forma fundida; esta capa pone el material.') : null),
       this.section('Deformación', Object.entries(l.deform).some(([k, v]) => ['twist', 'bend', 'wave', 'pinch'].includes(k) && v !== 0), null,
         h('p', { class: 'sx-hintline' }, 'Distorsiona la forma como los filtros de Photoshop. Usa ↔ para que vaya y vuelva.'),
         this.slider({ label: 'Remolino', min: -8, max: 8, step: 0.01, default: 0 }, () => l.deform.twist, v => { l.deform.twist = v; }, `${l.id}.deform.twist`),
@@ -875,25 +905,32 @@ export class ShadexEditor {
   private lightInspector(li: Light): HTMLElement[] {
     const name = h('input', { class: 'sx-title-input', value: li.name, spellcheck: false }) as HTMLInputElement;
     name.addEventListener('change', () => { this.record(); li.name = name.value.trim() || 'Luz'; this.renderLayers(); this.changed(); });
-    const ico = icon(li.kind === 'linear' ? 'linear' : 'light', 'sx-ico--shape sx-ico--lg sx-ico--light');
+    const ico = icon(li.kind === 'radial' ? 'light' : li.kind === 'sweep' ? 'sweep' : 'linear', 'sx-ico--shape sx-ico--lg sx-ico--light');
+    const sw = li.kind === 'sweep';
     ico.style.setProperty('--c', li.color);
     const moved = () => this.renderLightHandles();
     return [
       h('div', { class: 'sx-inspector__head' }, ico, name),
       h('p', { class: 'sx-hintline' }, 'Las luces viven en la escena. Cada forma con “Luz espacial” las lee desde su contorno: arrastra la luz sobre la vista y mira cómo el reflejo recorre el borde.'),
       this.section('Luz', true, null,
-        this.select<Light['kind']>('Tipo', [['radial', 'Radial (foco)'], ['linear', 'Franja (línea de luz)']], () => li.kind, v => { li.kind = v; this.renderLayers(); this.renderInspector(); }),
+        this.select<Light['kind']>('Tipo', [['radial', 'Radial (foco)'], ['linear', 'Franja (línea de luz)'], ['sweep', 'Barrido (destello que cruza)']], () => li.kind, v => {
+          li.kind = v;
+          if (v === 'sweep') { li.orbit = Math.max(li.orbit, 0.7); li.speed = Math.abs(li.speed) || 0.22; li.aspect = Math.min(li.aspect, 0.9); li.radius = Math.min(li.radius, 0.08); }
+          this.renderLayers(); this.renderInspector(); this.updateMarker();
+        }),
+        sw ? h('p', { class: 'sx-hintline' }, 'Cruza la escena con una curva Apple, aparece y se desvanece, y espera hasta el siguiente barrido. Brilla sobre luz espacial, seda y vidrio.') : null,
         h('div', { class: 'sx-field' }, h('label', { class: 'sx-field__label' }, 'Color'), this.color('Color', () => li.color, v => { li.color = v; moved(); })),
         this.slider({ label: 'Intensidad', min: 0, max: 4, step: 0.01, default: 1.2 }, () => li.intensity, v => { li.intensity = v; }, `${li.id}.intensity`),
-        this.slider({ label: li.kind === 'linear' ? 'Grosor de la franja' : 'Radio', min: 0.02, max: 1.5, step: 0.005, default: 0.45 }, () => li.radius, v => { li.radius = v; }, `${li.id}.radius`),
+        this.slider({ label: li.kind === 'radial' ? 'Radio' : sw ? 'Ancho del destello' : 'Grosor de la franja', min: sw ? 0.005 : 0.02, max: 1.5, step: 0.005, default: 0.45 }, () => li.radius, v => { li.radius = v; }, `${li.id}.radius`),
         li.kind === 'radial' ? this.slider({ label: 'Proporción elíptica', min: 0.15, max: 3, step: 0.01, default: 1 }, () => li.aspect, v => { li.aspect = v; }, `${li.id}.aspect`) : null,
-        this.slider({ label: 'Rotación', min: -3.1416, max: 3.1416, step: 0.01, default: 0 }, () => li.rotation, v => { li.rotation = v; }, `${li.id}.rotation`),
+        sw ? this.slider({ label: 'Pausa entre barridos', min: 0, max: 0.9, step: 0.01, default: 0.55 }, () => li.aspect, v => { li.aspect = v; }, `${li.id}.aspect`) : null,
+        this.slider({ label: sw ? 'Ángulo del destello' : 'Rotación', min: -3.1416, max: 3.1416, step: 0.01, default: 0 }, () => li.rotation, v => { li.rotation = v; }, `${li.id}.rotation`),
         this.slider({ label: 'Altura (rasante ↔ cenital)', min: 0.02, max: 1.5, step: 0.01, default: 0.35 }, () => li.height, v => { li.height = v; }, `${li.id}.height`)),
       this.section('Posición y recorrido', true, null,
         this.slider({ label: 'Horizontal', min: -1.5, max: 1.5, step: 0.005, default: 0 }, () => li.x, v => { li.x = v; moved(); }, `${li.id}.x`),
         this.slider({ label: 'Vertical', min: -1, max: 1, step: 0.005, default: 0 }, () => li.y, v => { li.y = v; moved(); }, `${li.id}.y`),
-        this.slider({ label: 'Radio de órbita', min: 0, max: 0.8, step: 0.005, default: 0.12 }, () => li.orbit, v => { li.orbit = v; moved(); }, `${li.id}.orbit`),
-        this.slider({ label: 'Velocidad de órbita', min: -2, max: 2, step: 0.01, default: 0.35 }, () => li.speed, v => { li.speed = v; }, `${li.id}.speed`),
+        this.slider({ label: sw ? 'Recorrido (desde el centro)' : 'Radio de órbita', min: 0, max: sw ? 2 : 0.8, step: 0.005, default: sw ? 0.9 : 0.12 }, () => li.orbit, v => { li.orbit = v; moved(); }, `${li.id}.orbit`),
+        this.slider({ label: sw ? 'Barridos por segundo' : 'Velocidad de órbita', min: sw ? 0.01 : -2, max: 2, step: 0.01, default: sw ? 0.22 : 0.35 }, () => li.speed, v => { li.speed = v; }, `${li.id}.speed`),
         this.slider({ label: 'Desfase', min: 0, max: 6.283, step: 0.01, default: 0 }, () => li.phase, v => { li.phase = v; }, `${li.id}.phase`)),
     ];
   }

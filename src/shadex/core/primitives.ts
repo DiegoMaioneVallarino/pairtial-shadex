@@ -197,6 +197,8 @@ export const GLSL_COMMON = /* glsl */ `
 #define TAU 6.28318530718
 struct Hit { float cov; float dc; float w; float v; float t; vec3 n; float m; float sd; vec2 g; };
 // sd: signed distance to the outline (<0 inside) · g: unit direction away from the outline
+
+
 float sx_hash(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 vec2 sx_hash2(vec2 p){ vec3 p3=fract(vec3(p.xyx)*vec3(.1031,.1030,.0973)); p3+=dot(p3,p3.yzx+33.33); return fract((p3.xx+p3.yz)*p3.zy); }
 float sx_noise(vec2 p){ vec2 i=floor(p),f=fract(p); vec2 u=f*f*(3.-2.*f);
@@ -216,6 +218,61 @@ vec2 sx_deform(vec2 p,float t,float tw,float twr,float bend,float wv,float wf,fl
   if(wv!=0.) p.y+=wv*sin(p.x*wf+t*ws);
   if(pinch!=0.){ float r=length(p); p*=pow(max(r,1e-4)/.4,clamp(pinch,-.9,.9)); }
   return p;
+}
+// Easing (0 linear · 1 smooth · 2 apple: quint in-out · 3 spring: overshoot · 4 bounce)
+float sx_ease(float x,float m){
+  if(m<.5) return x;
+  if(m<1.5) return x*x*(3.-2.*x);
+  if(m<2.5) return x<.5?16.*x*x*x*x*x:1.-pow(-2.*x+2.,5.)*.5;
+  if(m<3.5) return 1.-exp(-6.*x)*cos(9.*x)*(1.-x);
+  float n=7.5625,d=2.75;
+  if(x<1./d) return n*x*x;
+  if(x<2./d){ x-=1.5/d; return n*x*x+.75; }
+  if(x<2.5/d){ x-=2.25/d; return n*x*x+.9375; }
+  x-=2.625/d; return n*x*x+.984375;
+}
+// Ping-pong 0→1→0 (period 2) with easing on each stretch and a rest at both ends
+float sx_anim(float ph,float hold,float m){
+  float c=fract(ph*.5)*2.;
+  bool up=c<1.;
+  float x=up?c:c-1.;
+  x=clamp((x-hold*.5)/max(1.-hold,1e-3),0.,1.);
+  float e=sx_ease(x,m);
+  return up?e:1.-e;
+}
+// Smooth union of two outlines (liquid merge). k=0 → plain union.
+Hit sx_smin(Hit a,Hit b,float k,float px){
+  if(k<=1e-5){ if(a.sd<=b.sd) return a; return b; }
+  float hh=clamp(.5+.5*(b.sd-a.sd)/k,0.,1.);
+  Hit r;
+  r.sd=mix(b.sd,a.sd,hh)-k*hh*(1.-hh);
+  r.g=normalize(mix(b.g,a.g,hh)+1e-6);
+  r.n=normalize(mix(b.n,a.n,hh)+vec3(0.,0.,1e-4));
+  r.t=mix(b.t,a.t,hh); r.w=mix(b.w,a.w,hh); r.v=mix(b.v,a.v,hh); r.m=max(mix(b.m,a.m,hh),max(a.m,b.m)*step(r.sd,0.));
+  r.dc=max(r.sd+r.w,0.);
+  r.cov=1.-smoothstep(-px,px,r.sd);
+  return r;
+}
+// Morph: blend two outlines of the same point
+Hit sx_morph(Hit a,Hit b,float k,float px){
+  k=clamp(k,0.,1.);
+  if(k<=0.) return a;
+  Hit r;
+  r.sd=mix(a.sd,b.sd,k);
+  r.g=normalize(mix(a.g,b.g,k)+1e-6);
+  r.n=normalize(mix(a.n,b.n,k)+vec3(0.,0.,1e-4));
+  r.t=mix(a.t,b.t,k); r.w=mix(a.w,b.w,k); r.v=mix(a.v,b.v,k); r.m=mix(a.m,b.m,k);
+  r.dc=mix(a.dc,b.dc,k);
+  r.cov=1.-smoothstep(-px,px,r.sd);
+  return r;
+}
+// Express a hit from another layer (scale S2, rotation R2) in this layer's units (S, R)
+Hit sx_rebase(Hit o,float S2,float R2,float S,float R){
+  float k=S2/max(S,1e-4);
+  o.sd*=k; o.dc*=k; o.w*=k;
+  mat2 m=sx_rot(R2-R);
+  o.g=m*o.g; o.n.xy=m*o.n.xy;
+  return o;
 }
 vec3 sx_lin(vec3 c){ return pow(c,vec3(2.2)); }
 float sx_pp(float t){ return 1.-abs(fract(t*.5)*2.-1.); } // ping-pong 0..1..0
@@ -393,9 +450,13 @@ vec4 shadeLit(Hit h,vec2 wp,vec2 cw,vec3 pa,vec3 pb,vec3 pc,float t,
   vec3 pal=sx_pal(pa,pb,pc,k*.92+t*flow);
   vec3 body=mix(pa*.35,pal,clamp(ambient+k,0.,1.))*(ambient+dif*1.1)+Lp.rgb*Lp.a*surface*.25+spc*specular;
   // contour-driven light
-  vec3 rc=mix(Lc.rgb,mix(pc,vec3(1.),.4),.35);
   float rim=exp(-.5*pow(sd/max(edgeW,1e-4),2.))*edge*power;
-  float ig=step(sd,0.)*exp(-.5*pow(din/max(inner,1e-4),2.))*emission*.55*power;
+  // deep inside, the nearest contour point jumps (centre of a circle, bisectors of a polygon):
+  // blend toward the light at the pixel itself so the inner glow stays continuous
+  float deep=smoothstep(.15,1.,din/max(inner*2.,1e-3));
+  float powerIn=mix(power,(1.-exp(-Lp.a*1.1))*1.15,deep);
+  float ig=step(sd,0.)*exp(-.5*pow(din/max(inner,1e-4),2.))*emission*.55*powerIn;
+  vec3 rc=mix(mix(Lc.rgb,Lp.rgb,deep*step(sd,0.)),mix(pc,vec3(1.),.4),.35);
   float dout=max(sd,0.);
   float og=step(0.,sd)*exp(-.5*pow(dout/max(outer,1e-4),2.))*emission*.6*power;
   float bg=step(0.,sd)*exp(-.5*pow(dout/max(outer*3.,1e-4),2.))*bounce*.22*(1.-exp(-Lc.a));
@@ -425,7 +486,8 @@ vec4 shadeSilk(Hit h,vec2 wp,vec2 cw,vec3 pa,vec3 pb,vec3 pc,float t,float flow,
   float sp=pow(max(dot(h.n,H),0.),gloss)*sheen;
   float fr=pow(1.-max(h.n.z,0.),3.)*rim;
   vec3 hi=mix(pc,vec3(1.),.4);
-  vec3 c=base*lam+hi*(sp+fr*.6);
+  vec4 Ls=sx_lights(wp,t);
+  vec3 c=base*lam+hi*(sp+fr*.6)+Ls.rgb*(1.-exp(-Ls.a))*sheen*(.25+fr*.8);
   float a=h.cov*opacity*h.m;
   return vec4(c*a,a);
 }`,
@@ -447,9 +509,12 @@ vec4 shadeGlass(Hit h,vec2 wp,vec2 cw,vec3 pa,vec3 pb,vec3 pc,float t,float flow
   float caustic=pow(max(0.,dot(n.xy,-L.xy)),3.)*nz*.35*highlight;
   vec3 body=bg*(.8+.2*nz)+pc*caustic;
   // transparency = how much of the layers below shows through un-refracted
+  // scene lights (incl. sweeps) glint on the glass, strongest at grazing angles
+  vec4 Lg=sx_lights(wp,t);
+  float glint=(1.-exp(-Lg.a))*highlight*(.35+F*1.4);
   float k=h.cov*h.m;
-  float a=k*clamp(mix(1.,F+spec,transp),0.,1.);
-  vec3 c=k*(body*(1.-F)*(1.-transp)+env*F+vec3(spec));
+  float a=k*clamp(mix(1.,F+spec+glint*.5,transp),0.,1.);
+  vec3 c=k*(body*(1.-F)*(1.-transp)+env*F+vec3(spec)+Lg.rgb*glint);
   return vec4(c,a);
 }`,
   solid: /* glsl */ `
